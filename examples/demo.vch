@@ -1,0 +1,18 @@
+> name: Example Login Flow
+# This is an example Vouch test file
+# Vouch uses computer vision to interact with web apps — no selectors needed!
+
+@navigate https://example.com/login
+
+# Fill in the login form
+click on the email input field
+type test@example.com into the email field
+click on the password input field
+type SecurePassword123! into the password field
+
+# Submit the form
+click the Sign In button
+
+# Verify the dashboard loaded
+@assert Dashboard heading is visible
+@assert Navigation sidebar is present

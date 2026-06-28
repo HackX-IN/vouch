@@ -1,0 +1,60 @@
+{
+  "name": "vouch",
+  "version": "1.0.0",
+  "description": "Zero-selector, vision-driven web and desktop automation engine. Acts like a human QA engineer using AI-powered computer vision.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "vouch": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "bunx tsup",
+    "dev": "bunx tsup --watch",
+    "start": "node dist/index.js",
+    "lint": "bunx tsc --noEmit"
+  },
+  "keywords": [
+    "testing",
+    "automation",
+    "e2e",
+    "computer-vision",
+    "ai",
+    "qa",
+    "visual-testing"
+  ],
+  "author": "Vouch Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vouch-qa/vouch.git"
+  },
+  "files": [
+    "dist",
+    "examples",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md"
+  ],
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@clack/prompts": "^1.6.0",
+    "@google/generative-ai": "^0.21.0",
+    "boxen": "^8.0.1",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "figures": "^6.1.0",
+    "openai": "^4.73.0",
+    "ora": "^8.1.0",
+    "puppeteer": "^23.7.0",
+    "puppeteer-screen-recorder": "^3.0.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "tsup": "^8.3.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

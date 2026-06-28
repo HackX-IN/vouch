@@ -1,0 +1,21 @@
+> name: Real World Internet Login Flow
+# Testing the Vouch MVP using a public test site and local Ollama model
+
+@navigate https://the-internet.herokuapp.com/login
+
+# Enter username
+click on the username input field
+type tomsmith into the username field
+
+# Enter password
+click on the password input field
+type SuperSecretPassword! into the password field
+
+# Submit the form
+click on the login button
+
+# Wait for page to load after login
+@wait 2000
+
+# Verify the secure area page loaded
+@assert Secure Area page is visible with logout button
