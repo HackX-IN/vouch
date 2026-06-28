@@ -31,6 +31,10 @@ export class GoogleProvider extends BaseProvider {
     const generativeModel = this.genAI.getGenerativeModel({
       model: this.model,
       systemInstruction: systemPrompt,
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 1024,
+      },
     });
 
     const result = await generativeModel.generateContentStream([
@@ -50,8 +54,8 @@ export class GoogleProvider extends BaseProvider {
       }
     }
 
-    if (!accumulated.trim()) throw new Error("Google Gemini returned empty response");
+    if (!accumulated.trim())
+      throw new Error("Google Gemini returned empty response");
     return this.parseResponse(accumulated);
   }
 }
-

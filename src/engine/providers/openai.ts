@@ -24,13 +24,17 @@ export class OpenAIProvider extends BaseProvider {
     systemPrompt: string,
     stepInstruction: string,
     screenReaderOutput: string,
-    historyLedger: HistoryEntry[]
+    historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
-    const userMessage = buildUserMessage(stepInstruction, historyLedger, screenReaderOutput);
+    const userMessage = buildUserMessage(
+      stepInstruction,
+      historyLedger,
+      screenReaderOutput,
+    );
 
     const stream = await this.client.chat.completions.create({
       model: this.model,
-      max_tokens: 300,
+      max_tokens: 1024,
       temperature: 0.1,
       stream: true,
       messages: [
@@ -55,4 +59,3 @@ export class OpenAIProvider extends BaseProvider {
     return this.parseResponse(accumulated);
   }
 }
-

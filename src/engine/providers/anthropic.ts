@@ -38,7 +38,7 @@ export class AnthropicProvider extends BaseProvider {
 
     const stream = this.client.messages.stream({
       model: this.model,
-      max_tokens: 300,
+      max_tokens: 1024,
       temperature: 0.1,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
@@ -67,4 +67,3 @@ export class AnthropicProvider extends BaseProvider {
     return this.parseResponse(accumulated);
   }
 }
-

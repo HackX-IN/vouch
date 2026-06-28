@@ -44,7 +44,7 @@ export class OllamaProvider extends BaseProvider {
         keep_alive: "5m",
         options: {
           temperature: 0.1,
-          num_predict: 300,
+          num_predict: 1024,
         },
         messages: [
           { role: "system", content: systemPrompt },
@@ -153,4 +153,3 @@ export class OllamaProvider extends BaseProvider {
     return accumulated;
   }
 }
-
