@@ -135,6 +135,7 @@ export interface BrowserActions {
   close(): Promise<void>;
   navigate(url: string): Promise<void>;
   click(pixelX: number, pixelY: number): Promise<void>;
+  doubleClick(pixelX: number, pixelY: number): Promise<void>;
   type(pixelX: number, pixelY: number, text: string): Promise<void>;
   wait(ms: number): Promise<void>;
   getViewportSize(): { width: number; height: number };

@@ -53,10 +53,12 @@ export class BrowserController implements BrowserActions {
   }
 
   async launch(): Promise<void> {
-    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "vouch-browser-"));
+    const userDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "vouch-browser-"),
+    );
     const defaultDir = path.join(userDataDir, "Default");
     fs.mkdirSync(defaultDir, { recursive: true });
-    
+
     // Inject Chrome preferences to strictly disable password manager and leak detection
     const preferences = {
       profile: { password_manager_enabled: false },
@@ -64,9 +66,12 @@ export class BrowserController implements BrowserActions {
       password_manager: { leak_detection: false },
       safebrowsing: { enabled: false, enhanced: false },
       search: { suggest_enabled: false },
-      autofill: { profile_enabled: false, credit_card_enabled: false }
+      autofill: { profile_enabled: false, credit_card_enabled: false },
     };
-    fs.writeFileSync(path.join(defaultDir, "Preferences"), JSON.stringify(preferences));
+    fs.writeFileSync(
+      path.join(defaultDir, "Preferences"),
+      JSON.stringify(preferences),
+    );
 
     this.browser = await puppeteer.launch({
       userDataDir,
@@ -136,7 +141,18 @@ export class BrowserController implements BrowserActions {
         this.config.videoDir,
         `vouch-recording-${Date.now()}.mp4`,
       );
-      this.recorder = new PuppeteerScreenRecorder(this.page);
+      const recorderOptions = {
+        followNewTab: true,
+        fps: 15,
+        quality: 60,
+        videoFrame: {
+          width: this.config.viewportWidth,
+          height: this.config.viewportHeight,
+        },
+        videoBitrate: 800,
+        videoCrf: 28,
+      };
+      this.recorder = new PuppeteerScreenRecorder(this.page, recorderOptions);
       await this.recorder.start(this.videoPath);
     }
   }
@@ -177,6 +193,12 @@ export class BrowserController implements BrowserActions {
   async click(pixelX: number, pixelY: number): Promise<void> {
     this.assertPage();
     await this.page!.mouse.click(pixelX, pixelY);
+    await this.sleep(50);
+  }
+
+  async doubleClick(pixelX: number, pixelY: number): Promise<void> {
+    this.assertPage();
+    await this.page!.mouse.click(pixelX, pixelY, { count: 2 });
     await this.sleep(50);
   }
 
@@ -232,8 +254,21 @@ export class BrowserController implements BrowserActions {
 
     for (const node of nodes) {
       const role = node.role?.value;
-      const name = node.name?.value?.trim();
-      if (!role || SKIP_ROLES.has(role) || !name) continue;
+      const name = node.name?.value?.trim() || "";
+
+      if (!role || SKIP_ROLES.has(role)) continue;
+
+      if (
+        !name &&
+        role !== "image" &&
+        role !== "img" &&
+        role !== "graphics-document" &&
+        role !== "graphics-symbol" &&
+        role !== "button" &&
+        role !== "link"
+      ) {
+        continue;
+      }
 
       const backendNodeId = node.backendDOMNodeId;
       if (!backendNodeId) continue;
@@ -275,15 +310,17 @@ export class BrowserController implements BrowserActions {
       const normY = Math.round((centerY / vh) * 1000);
       const n = relevant[i];
 
-      let desc = `${n.role} "${n.name}"`;
+      let desc = n.name ? `${n.role} "${n.name}"` : `${n.role}`;
       if (n.value) desc += ` v="${n.value}"`;
       desc += ` @${normX},${normY}`;
       results.push(desc);
 
-      const key = n.name.toLowerCase();
-      const currentList = this.lastElementMap.get(key) || [];
-      currentList.push({ normX, normY, role: n.role, name: n.name });
-      this.lastElementMap.set(key, currentList);
+      if (n.name) {
+        const key = n.name.toLowerCase();
+        const currentList = this.lastElementMap.get(key) || [];
+        currentList.push({ normX, normY, role: n.role, name: n.name });
+        this.lastElementMap.set(key, currentList);
+      }
     }
 
     return results.length > 0 ? "UI:\n" + results.join("\n") : "UI: empty";
@@ -322,7 +359,7 @@ export class BrowserController implements BrowserActions {
       }
     }
 
-    return bestMatch && bestScore > 0.3
+    return bestMatch && bestScore >= 0.85
       ? { normX: bestMatch.normX, normY: bestMatch.normY }
       : null;
   }

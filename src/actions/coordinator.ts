@@ -211,7 +211,7 @@ export class ActionCoordinator {
     let pixelX: number;
     let pixelY: number;
 
-    const targetQuery = response.targetElement || step.instruction;
+    const targetQuery = response.targetElement !== undefined ? response.targetElement : step.instruction;
     const resolved = this.browser.resolveElement(targetQuery);
 
     if (resolved) {
@@ -244,6 +244,9 @@ export class ActionCoordinator {
         case "click":
         case "select":
           await this.browser.click(pixelX, pixelY);
+          break;
+        case "doubleClick":
+          await this.browser.doubleClick(pixelX, pixelY);
           break;
         case "type":
           if (!response.textPayload) {

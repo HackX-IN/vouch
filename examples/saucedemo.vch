@@ -1,0 +1,25 @@
+> name: SauceDemo E2E Flow
+
+@navigate https://www.saucedemo.com/
+
+# 1. Login Process
+type standard_user into the Username field
+type secret_sauce into the Password field
+click the Login button
+
+# 2. Add to Cart
+click the first Add to cart button
+
+# 3. Checkout Flow
+click the icon with alias: shopping_cart_link
+click the Checkout button
+
+# 4. Shipping Information
+type John into the First Name field
+type Doe into the Last Name field
+type 90210 into the Zip/Postal Code field
+click the Continue button
+
+# 5. Finalize
+click the Finish button
+@assert Thank you for your order! is visible
