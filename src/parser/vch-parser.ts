@@ -3,46 +3,37 @@ import * as path from "node:path";
 import type { TestStep, TestSuite } from "../types/index";
 
 /**
- * Parses `.vtest` files into structured TestSuite objects.
+ * Parses `.vch` script sheets into structured TestSuite object configurations.
+ * Handles structural schema errors defensively, reporting accurate line numbers on failures.
  *
- * .vtest Format:
- * ─────────────
- * Lines starting with # are comments
- * Lines starting with > are metadata (suite name, config overrides)
- * Lines starting with @ are directives (@navigate, @wait, @assert)
- * All other non-empty lines are plain English action instructions
- *
- * Example:
- *   > name: Login Flow Test
- *   @navigate https://example.com/login
- *   click on the email input field
- *   type test@example.com in the email field
- *   click the password field
- *   type MySecurePass123! in the password field
- *   click the Sign In button
- *   @assert Dashboard page is visible
+ * Time Complexity: O(N) where N is the character length of the raw file content.
+ * Space Complexity: O(M) where M is the generated instruction step matrix ledger allocation.
  */
 export function parseVchFile(filePath: string): TestSuite {
   const absolutePath = path.resolve(filePath);
   if (!fs.existsSync(absolutePath)) {
-    throw new Error(`Test file not found: ${absolutePath}`);
+    throw new Error(
+      `File System Exception: Targeted test script sheet path not found: "${absolutePath}"`,
+    );
   }
 
   const content = fs.readFileSync(absolutePath, "utf-8");
-  const lines = content.split("\n");
+  const lines = content.split(/\r?\n/); // Safely handle both POSIX and Windows line endings
 
   let suiteName = path.basename(filePath, ".vch");
   const steps: TestStep[] = [];
+
+  // Scoping depth indicator to guarantee structural integrity of conditional flows
+  let activeConditionalDepth = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const trimmed = raw.trim();
     const lineNumber = i + 1;
 
-    // Skip empty lines
     if (!trimmed) continue;
 
-    // Comment lines
+    // 1. Comment Processing Path
     if (trimmed.startsWith("#")) {
       steps.push({
         lineNumber,
@@ -53,23 +44,41 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // Metadata lines
+    // 2. Metadata Key-Value Processing Path
     if (trimmed.startsWith(">")) {
       const metaContent = trimmed.slice(1).trim();
       const colonIndex = metaContent.indexOf(":");
-      if (colonIndex > 0) {
-        const key = metaContent.slice(0, colonIndex).trim().toLowerCase();
-        const value = metaContent.slice(colonIndex + 1).trim();
-        if (key === "name") {
-          suiteName = value;
-        }
+
+      if (colonIndex <= 0) {
+        throw new Error(
+          `Syntax Error [Line ${lineNumber}]: Malformed metadata assignments. Expected "> key: value", found "${trimmed}"`,
+        );
+      }
+
+      const key = metaContent.slice(0, colonIndex).trim().toLowerCase();
+      // Safely slice all remaining content to preserve parameters with standalone ports/colons
+      const value = metaContent.slice(colonIndex + 1).trim();
+
+      if (!value) {
+        throw new Error(
+          `Syntax Error [Line ${lineNumber}]: Metadata block key "${key}" contains an empty parameter allocation.`,
+        );
+      }
+
+      if (key === "name") {
+        suiteName = value;
       }
       continue;
     }
 
-    // Navigate directive
+    // 3. Navigation Directives
     if (trimmed.startsWith("@navigate")) {
-      const url = trimmed.replace(/^@navigate\s+/, "").trim();
+      const url = trimmed.slice(9).trim(); // Fast offset pointer slice instead of sweeping RegExp lookups
+      if (!url || url === "@navigate") {
+        throw new Error(
+          `Syntax Error [Line ${lineNumber}]: Directives for "@navigate" require a valid target URL value parameter assignment.`,
+        );
+      }
       steps.push({
         lineNumber,
         raw,
@@ -80,22 +89,35 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // Wait directive
+    // 4. Thread Delay Wait Directives
     if (trimmed.startsWith("@wait")) {
-      const ms = trimmed.replace(/^@wait\s+/, "").trim();
+      const msParam = trimmed.slice(5).trim();
+      const ms = parseInt(msParam, 10);
+
+      if (isNaN(ms) || ms < 0) {
+        throw new Error(
+          `Syntax Error [Line ${lineNumber}]: Directives for "@wait" must define a non-negative numerical millisecond value. Found: "${msParam}"`,
+        );
+      }
+
       steps.push({
         lineNumber,
         raw,
         instruction: `Wait for ${ms}ms`,
         type: "wait",
-        meta: { duration: ms },
+        meta: { duration: String(ms) },
       });
       continue;
     }
 
-    // Assert directive
+    // 5. Visual State Assertion Directives
     if (trimmed.startsWith("@assert")) {
-      const assertion = trimmed.replace(/^@assert\s+/, "").trim();
+      const assertion = trimmed.slice(7).trim();
+      if (!assertion) {
+        throw new Error(
+          `Syntax Error [Line ${lineNumber}]: Directives for "@assert" require explicit plain English conditional validation instructions.`,
+        );
+      }
       steps.push({
         lineNumber,
         raw,
@@ -105,9 +127,16 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // Conditional directive
+    // 6. Branching Condition Blocks
     if (trimmed.startsWith("@if")) {
-      const condition = trimmed.replace(/^@if\s+/, "").trim();
+      const condition = trimmed.slice(3).trim();
+      if (!condition) {
+        throw new Error(
+          `Syntax Error [Line ${lineNumber}]: Directives for "@if" require a valid layout condition statement parameter.`,
+        );
+      }
+
+      activeConditionalDepth++;
       steps.push({
         lineNumber,
         raw,
@@ -117,13 +146,44 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // Plain English action instruction
+    // 7. Scoping End Tokens
+    if (trimmed.startsWith("@endif")) {
+      if (activeConditionalDepth <= 0) {
+        throw new Error(
+          `Compilation Closure Fault [Line ${lineNumber}]: Encountered an isolated "@endif" statement token without a matching parent "@if" condition block.`,
+        );
+      }
+      activeConditionalDepth--;
+      steps.push({
+        lineNumber,
+        raw,
+        instruction: "End of conditional block execution scope",
+        type: "action", // Evaluated as a passive closing tracking line item step
+      });
+      continue;
+    }
+
+    // Prevent random unhandled structural directive tokens leaks from hitting natural language layers
+    if (trimmed.startsWith("@")) {
+      throw new Error(
+        `Syntax Error [Line ${lineNumber}]: Unrecognized runner directive statement framework instruction: "${trimmed}"`,
+      );
+    }
+
+    // 8. Plain English Actions Execution Path Fallback
     steps.push({
       lineNumber,
       raw,
       instruction: trimmed,
       type: "action",
     });
+  }
+
+  // Verify that all conditional blocks opened were closed correctly
+  if (activeConditionalDepth > 0) {
+    throw new Error(
+      `Compilation Structural Fault [File: ${suiteName}]: Script processing terminated with unclosed structural scopes. Missing trailing "@endif" closures across ${activeConditionalDepth} conditional logic pathways.`,
+    );
   }
 
   return {

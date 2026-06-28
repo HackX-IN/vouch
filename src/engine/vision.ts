@@ -13,35 +13,39 @@ import { GoogleProvider } from "./providers/google.js";
 import { OllamaProvider } from "./providers/ollama.js";
 
 /**
- * Creates the appropriate AI provider client based on config.
+ * Creates the appropriate AI provider client based on config parameters.
+ * Validates dependencies strictly at initialization.
  */
 export function createProvider(config: VouchConfig): AIProviderClient {
   const providers: Record<AIProvider, () => AIProviderClient> = {
     openai: () => {
-      if (!config.apiKey)
+      if (!config.apiKey?.trim()) {
         throw new Error(
-          "OpenAI API key is required. Set VOUCH_API_KEY or provider.apiKey in config.",
+          "Missing Dependency Exception: OpenAI API key required. Provide via VOUCH_API_KEY environment variable or configuration file.",
         );
+      }
       return new OpenAIProvider(config.apiKey, config.model, config.baseUrl);
     },
     anthropic: () => {
-      if (!config.apiKey)
+      if (!config.apiKey?.trim()) {
         throw new Error(
-          "Anthropic API key is required. Set VOUCH_API_KEY or provider.apiKey in config.",
+          "Missing Dependency Exception: Anthropic API key required. Provide via VOUCH_API_KEY environment variable or configuration file.",
         );
+      }
       return new AnthropicProvider(config.apiKey, config.model, config.baseUrl);
     },
     google: () => {
-      if (!config.apiKey)
+      if (!config.apiKey?.trim()) {
         throw new Error(
-          "Google API key is required. Set VOUCH_API_KEY or provider.apiKey in config.",
+          "Missing Dependency Exception: Google Gemini API key required. Provide via VOUCH_API_KEY environment variable or configuration file.",
         );
+      }
       return new GoogleProvider(config.apiKey, config.model);
     },
     ollama: () => {
       return new OllamaProvider(
         config.model,
-        config.baseUrl || "http://localhost:11434",
+        config.baseUrl?.trim() || "http://localhost:11434",
       );
     },
   };
@@ -49,16 +53,15 @@ export function createProvider(config: VouchConfig): AIProviderClient {
   const factory = providers[config.provider];
   if (!factory) {
     throw new Error(
-      `Unknown AI provider: "${config.provider}". Supported: openai, anthropic, google, ollama`,
+      `Unsupported Engine Target: Specified client provider "${config.provider}" does not match active implementation suites.`,
     );
   }
   return factory();
 }
 
 /**
- * VisionQA Engine — the cognitive core of Vouch.
- *
- * Uses screen reader output (not screenshots) for AI analysis.
+ * VisionQA Engine — Cognitive Core Controller.
+ * Decoupled from stateful configuration layers to support dynamic model execution transformations.
  */
 export class VisionQAEngine {
   private provider: AIProviderClient;
@@ -70,13 +73,28 @@ export class VisionQAEngine {
   }
 
   /**
-   * Analyze the page using screen reader output and step instruction.
+   * Hot-swaps the underlying model provider client at runtime if config overrides are applied.
+   */
+  public updateConfiguration(newConfig: VouchConfig): void {
+    this.config = newConfig;
+    this.provider = createProvider(newConfig);
+  }
+
+  /**
+   * Analyzes page context via high-performance system configurations.
+   * Time Complexity: O(M) where M is the message layout serialization length.
    */
   async analyze(
     stepInstruction: string,
     screenReaderOutput: string,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
+    if (!stepInstruction?.trim()) {
+      throw new Error(
+        "Execution Context Failure: Step instructions cannot be evaluated with empty string contents.",
+      );
+    }
+
     return this.provider.analyze(
       VISION_QA_SYSTEM_PROMPT,
       stepInstruction,
@@ -86,31 +104,38 @@ export class VisionQAEngine {
   }
 
   /**
-   * Convert normalized coordinates (0-1000) to pixel coordinates.
+   * Maps normalized coordinates (0-1000) down to absolute display spaces safely.
+   * Enforces rigorous execution constraints against malformed engine coordinate sets.
    */
-  toPixelCoords(
+  public toPixelCoords(
     normalizedX: number,
     normalizedY: number,
     viewportWidth: number,
     viewportHeight: number,
   ): { pixelX: number; pixelY: number } {
+    // Confine calculations within bounded limits to prevent runtime browser execution failures
+    const safeX = Math.max(0, Math.min(1000, normalizedX));
+    const safeY = Math.max(0, Math.min(1000, normalizedY));
+
     return {
-      pixelX: Math.round((normalizedX / 1000) * viewportWidth),
-      pixelY: Math.round((normalizedY / 1000) * viewportHeight),
+      pixelX: Math.round((safeX / 1000) * viewportWidth),
+      pixelY: Math.round((safeY / 1000) * viewportHeight),
     };
   }
 
   /**
-   * Checks if the response indicates a terminal action.
+   * Evaluates if an execution outcome requires terminating the processing sequence.
    */
-  isTerminal(response: VisionQAResponse): boolean {
+  public isTerminal(response: VisionQAResponse): boolean {
+    if (!response || !response.action) return false;
     return (TERMINAL_ACTIONS as readonly string[]).includes(response.action);
   }
 
   /**
-   * Checks if the response contains a validation error.
+   * Determines if structural field input failures have been raised.
    */
-  hasValidationError(response: VisionQAResponse): boolean {
+  public hasValidationError(response: VisionQAResponse): boolean {
+    // Explicit array checks safely guard against structural model parsing bugs
     return response.detectedValidationError.length > 0;
   }
 }

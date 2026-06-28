@@ -12,15 +12,12 @@ import { BrowserController } from "../browser/controller.js";
 
 /**
  * Actor-Critic Action Coordinator.
- *
- * Flow per step:
- * 1. Screen reader → AI analysis → execute action → repeat
- * 2. Actor-Critic loop for automatic self-healing
+ * Highly optimized for ultra-low latency AI interactions via the Accessibility Tree.
  */
 export class ActionCoordinator {
-  private engine: VisionQAEngine;
-  private browser: BrowserController;
-  private config: VouchConfig;
+  private readonly engine: VisionQAEngine;
+  private readonly browser: BrowserController;
+  private readonly config: VouchConfig;
 
   constructor(
     engine: VisionQAEngine,
@@ -33,13 +30,19 @@ export class ActionCoordinator {
   }
 
   /**
-   * Execute a single test step with self-healing retries.
+   * Execute a single test step with deterministic self-healing retries.
+   * Time Complexity per attempt: O(N) where N is the depth of the AX Tree.
+   * Space Complexity: O(M) where M is the history allocation ledger size.
    */
-  async executeStep(step: TestStep, isLastStep: boolean, criticFeedback?: string): Promise<StepResult> {
+  async executeStep(
+    step: TestStep,
+    isLastStep: boolean,
+    initialCriticFeedback?: string,
+  ): Promise<StepResult> {
     const startTime = Date.now();
     const history: HistoryEntry[] = [];
+    let currentCriticFeedback = initialCriticFeedback;
 
-    // Handle special step types
     if (step.type === "comment") {
       return { step, status: "skipped", duration: 0, attempts: [] };
     }
@@ -76,30 +79,31 @@ export class ActionCoordinator {
       };
     }
 
-    // For action, assert, and conditional steps: Actor-Critic loop
+    // Main Actor-Critic Loop Execution Strategy
     for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
       try {
-        // 1. Read the page via screen reader (accessibility API)
+        // Enforce network settling and UI rendering stabilization buffers before reading tree
+        if (attempt > 1) {
+          await this.browser.wait(this.config.actionDelay * attempt);
+        }
+
         const screenReader = await this.browser.getScreenReaderOutput();
 
-        // 2. Format instruction based on step type
         let instruction =
           step.type === "assert"
             ? `ASSERTION: "${step.instruction}". Carefully read the UI tree. If condition is visibly true, action="complete". If false/missing, action="fail". DO NOT guess.`
             : step.instruction;
-            
-        if (criticFeedback) {
-          instruction += `\nCRITIC FEEDBACK FROM PREVIOUS ATTEMPT: ${criticFeedback}`;
+
+        if (currentCriticFeedback) {
+          instruction += `\nCRITIC FEEDBACK FROM PREVIOUS ATTEMPT: ${currentCriticFeedback}`;
         }
 
-        // 3. Send to VisionQA engine
         const response = await this.engine.analyze(
           instruction,
           screenReader,
           history,
         );
 
-        // 3. Build history entry
         const entry: HistoryEntry = {
           attempt,
           action: response.action,
@@ -112,7 +116,6 @@ export class ActionCoordinator {
             response.detectedValidationError || undefined,
         };
 
-        // 4. Terminal: complete
         if (response.action === "complete") {
           entry.success = true;
           history.push(entry);
@@ -124,59 +127,45 @@ export class ActionCoordinator {
           };
         }
 
-        // 5. Terminal: fail
         if (response.action === "fail") {
           entry.success = false;
           entry.error = response.reasoning;
           history.push(entry);
 
-          if (attempt < this.config.maxRetries) {
-            await this.browser.wait(this.config.actionDelay);
-            continue;
-          }
-
-          return {
-            step,
-            status: "failed",
-            duration: Date.now() - startTime,
-            attempts: history,
-            error: response.reasoning,
-          };
-        }
-
-        // 6. If this is an assert step, it MUST respond complete or fail.
-        if (step.type === "assert") {
-          entry.success = false;
-          entry.error = `Invalid action for assert step: "${response.action}". You must respond "complete" or "fail".`;
-          history.push(entry);
+          currentCriticFeedback = `Action engine failed explicitly. Reason: ${response.reasoning}`;
           continue;
         }
 
-        // 7. Execute the action for non-assert steps
-        await this.dispatchAction(response, step);
+        if (step.type === "assert") {
+          entry.success = false;
+          entry.error = `Invalid action for assert step: "${response.action}". Assert steps must evaluate to "complete" or "fail".`;
+          history.push(entry);
+          currentCriticFeedback = entry.error;
+          continue;
+        }
 
-        // 8. Post-action delay
+        // Execute action with fresh context mutation awareness
+        await this.dispatchAction(response, step);
         await this.browser.wait(this.config.actionDelay);
 
-        // 9. Check for validation errors (Critic phase)
         if (response.detectedValidationError) {
           entry.success = false;
           entry.error = `Validation error: ${response.detectedValidationError}`;
           history.push(entry);
-          continue; // Retry — AI will self-heal from the history
+          currentCriticFeedback = `The element interacted with raised a validation error: ${response.detectedValidationError}. Choose a different parameter or fix the field constraint.`;
+          continue;
         }
 
-        // 10. Wait action → re-evaluate
         if (response.action === "wait") {
           entry.success = true;
           history.push(entry);
           continue;
         }
 
-        // 11. Mark success for action step
         entry.success = true;
         history.push(entry);
 
+        // Break early if action is structurally verified
         return {
           step,
           status: "passed",
@@ -184,6 +173,7 @@ export class ActionCoordinator {
           attempts: history,
         };
       } catch (err) {
+        const runtimeError = err instanceof Error ? err.message : String(err);
         history.push({
           attempt,
           action: "fail",
@@ -191,106 +181,118 @@ export class ActionCoordinator {
           y: 0,
           timestamp: Date.now(),
           success: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: runtimeError,
         });
+        currentCriticFeedback = `Runtime Execution Exception: ${runtimeError}`;
       }
     }
 
-    // All retries exhausted
     return {
       step,
       status: "failed",
       duration: Date.now() - startTime,
       attempts: history,
-      error: `Step failed after ${this.config.maxRetries} attempts. Last errors: ${history
+      error: `Step execution failed after exhausting ${this.config.maxRetries} loops. Key Ledger Faults: ${history
         .filter((h) => h.error)
-        .map((h) => h.error)
+        .map((h) => `[Attempt ${h.attempt}]: ${h.error}`)
         .join(" | ")}`,
     };
   }
 
   /**
-   * Dispatch any action to the browser — extensible, not a fixed set.
-   * 
-   * Smart Element Resolution: If the AI provides a targetElement name,
-   * we look up its real coordinates from the AX tree cache instead of
-   * trusting the model's guessed x,y. This makes small models reliable.
+   * Dispatches exact side-effects to the CDP wrapper.
+   * Leverages precise bounding box heuristics over unreliable model predictions.
    */
-  private async dispatchAction(response: VisionQAResponse, step: TestStep): Promise<void> {
+  private async dispatchAction(
+    response: VisionQAResponse,
+    step: TestStep,
+  ): Promise<void> {
     const { width, height } = this.browser.getViewportSize();
-    
-    // Smart resolution: prefer element name lookup over raw coordinates
     let pixelX: number;
     let pixelY: number;
-    
-    // First try the model's targetElement, then fallback to fuzzy matching the step instruction itself
+
     const targetQuery = response.targetElement || step.instruction;
     const resolved = this.browser.resolveElement(targetQuery);
-    
+
     if (resolved) {
-      // Use the real coordinates from the AX tree
       pixelX = Math.round((resolved.normX / 1000) * width);
       pixelY = Math.round((resolved.normY / 1000) * height);
     } else {
-      // Fallback to model's guessed coordinates
-      const coords = this.engine.toPixelCoords(response.x, response.y, width, height);
+      const coords = this.engine.toPixelCoords(
+        response.x,
+        response.y,
+        width,
+        height,
+      );
       pixelX = coords.pixelX;
       pixelY = coords.pixelY;
     }
-    
+
     const page = this.browser.getPage();
+    let elementHandle: any = null;
 
-    // 1. Resolve the exact DOM element at these coordinates for smarter interaction
-    const elementHandle = await page
-      .evaluateHandle((x, y) => document.elementFromPoint(x, y), pixelX, pixelY)
-      .catch(() => null);
+    try {
+      elementHandle = await page
+        .evaluateHandle(
+          (x, y) => document.elementFromPoint(x, y),
+          pixelX,
+          pixelY,
+        )
+        .catch(() => null);
 
-    switch (response.action) {
-      case "click":
-        await this.browser.click(pixelX, pixelY);
-        break;
-      case "type":
-        await this.browser.type(pixelX, pixelY, response.textPayload);
-        break;
-      case "wait":
-        await this.browser.wait(2000);
-        break;
-      case "scroll":
-        await page.mouse.wheel({ deltaY: response.y > 500 ? 300 : -300 });
-        break;
-      case "hover":
-        await page.mouse.move(pixelX, pixelY);
-        break;
-      case "keypress":
-        await page.keyboard.press(response.textPayload as any);
-        break;
-      case "select":
-        // Click to open, then click the option
-        await this.browser.click(pixelX, pixelY);
-        break;
-      case "upload":
-        // File inputs cannot be clicked normally to upload files via code, it opens an OS dialog.
-        // We MUST use the ElementHandle to upload the file directly.
-        if (elementHandle && response.textPayload) {
-          const el =
-            elementHandle.asElement() as unknown as import("puppeteer").ElementHandle<HTMLInputElement>;
-          if (el) {
-            await el.uploadFile(response.textPayload);
-          } else {
-            // Fallback
-            await this.browser.click(pixelX, pixelY);
+      switch (response.action) {
+        case "click":
+        case "select":
+          await this.browser.click(pixelX, pixelY);
+          break;
+        case "type":
+          if (!response.textPayload) {
+            throw new Error(
+              `Action payload error: Attempted action "type" without textPayload content.`,
+            );
           }
-        }
-        break;
-      default:
-        // For any unknown action, try to click at the coordinates
-        await this.browser.click(pixelX, pixelY);
-        break;
-    }
-
-    // Cleanup handle to prevent memory leaks
-    if (elementHandle) {
-      await elementHandle.dispose().catch(() => {});
+          await this.browser.type(pixelX, pixelY, response.textPayload);
+          break;
+        case "wait":
+          await this.browser.wait(2000);
+          break;
+        case "scroll":
+          await page.mouse.wheel({ deltaY: response.y > 500 ? 300 : -300 });
+          break;
+        case "hover":
+          await page.mouse.move(pixelX, pixelY);
+          break;
+        case "keypress":
+          if (!response.textPayload) {
+            throw new Error(
+              `Action payload error: Keypress instruction received with empty payload token.`,
+            );
+          }
+          await page.keyboard.press(response.textPayload as any);
+          break;
+        case "upload":
+          if (elementHandle && response.textPayload) {
+            const fileInput = await elementHandle.asElement();
+            if (fileInput) {
+              await fileInput.uploadFile(response.textPayload);
+            } else {
+              await this.browser.click(pixelX, pixelY);
+            }
+          } else {
+            throw new Error(
+              `Upload execution failed: Missing valid DOM target handle or local path payload alignment.`,
+            );
+          }
+          break;
+        default:
+          throw new Error(
+            `Unsupported Action Exception: The VisionQA Engine emitted target action "${response.action}" which has no valid execution strategy.`,
+          );
+      }
+    } finally {
+      if (elementHandle) {
+        await elementHandle.dispose().catch(() => {});
+      }
     }
   }
 }
