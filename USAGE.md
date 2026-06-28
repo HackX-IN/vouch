@@ -8,9 +8,9 @@ Vouch is a blazing-fast, zero-selector, vision-driven web automation framework. 
 
 Install Vouch globally using npm:
 
-\`\`\`bash
+```bash
 npm install -g @inamul_hasan/vouch
-\`\`\`
+```
 
 ---
 
@@ -18,9 +18,9 @@ npm install -g @inamul_hasan/vouch
 
 Navigate to your project folder and run Vouch. If it's your first time, it will automatically generate a \`vouch.config.json\` file for you.
 
-\`\`\`bash
+```bash
 vouch
-\`\`\`
+```
 
 *This launches the interactive Daytona-style CLI menu where you can configure providers and run tests easily.*
 
@@ -32,7 +32,7 @@ Tests in Vouch are written in plain English inside `.vch` files. Vouch is heavil
 
 ### Example Test (`login.vch`):
 
-\`\`\`text
+```text
 > name: Real World Login
 
 @navigate https://the-internet.herokuapp.com/login
@@ -47,7 +47,7 @@ click on the login button
 @wait 2000
 
 @assert Secure Area page is visible with logout button
-\`\`\`
+```
 
 ### Available Commands:
 
@@ -67,7 +67,7 @@ click on the login button
 The behavior of Vouch is controlled by \`vouch.config.json\` located in the directory where you run the command.
 
 ### Example Configuration:
-\`\`\`json
+```json
 {
   "provider": "ollama",
   "model": "qwen2.5-coder:3b",
@@ -82,7 +82,7 @@ The behavior of Vouch is controlled by \`vouch.config.json\` located in the dire
   "recordVideo": true,
   "videoDir": "./.vouch/videos"
 }
-\`\`\`
+```
 
 ### Supported Providers:
 
@@ -109,22 +109,22 @@ Vouch supports cloud models and local infrastructure natively. You must set the 
 You can bypass the interactive menu and run tests directly in CI/CD environments or scripts.
 
 ### Basic Run
-\`\`\`bash
+```bash
 vouch run examples/login.vch
-\`\`\`
+```
 
 ### Overriding Configuration via Flags
 You can override \`vouch.config.json\` directly from the terminal:
 
-\`\`\`bash
-vouch run tests/checkout.vch \\
-  --provider openai \\
-  --model gpt-4o \\
-  --api-key sk-xxxxxx \\
-  --headless \\
-  --retries 5 \\
+```bash
+vouch run tests/checkout.vch \
+  --provider openai \
+  --model gpt-4o \
+  --api-key sk-xxxxxx \
+  --headless \
+  --retries 5 \
   --viewport 1920x1080
-\`\`\`
+```
 
 ---
 
