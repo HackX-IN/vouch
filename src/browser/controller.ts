@@ -2,6 +2,7 @@ import puppeteer, { type Browser, type Page, type CDPSession } from "puppeteer";
 import { PuppeteerScreenRecorder } from "puppeteer-screen-recorder";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import type { BrowserActions, VouchConfig } from "../types/index.js";
 
 const SKIP_ROLES = new Set([
@@ -52,7 +53,23 @@ export class BrowserController implements BrowserActions {
   }
 
   async launch(): Promise<void> {
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "vouch-browser-"));
+    const defaultDir = path.join(userDataDir, "Default");
+    fs.mkdirSync(defaultDir, { recursive: true });
+    
+    // Inject Chrome preferences to strictly disable password manager and leak detection
+    const preferences = {
+      profile: { password_manager_enabled: false },
+      credentials_enable_service: false,
+      password_manager: { leak_detection: false },
+      safebrowsing: { enabled: false, enhanced: false },
+      search: { suggest_enabled: false },
+      autofill: { profile_enabled: false, credit_card_enabled: false }
+    };
+    fs.writeFileSync(path.join(defaultDir, "Preferences"), JSON.stringify(preferences));
+
     this.browser = await puppeteer.launch({
+      userDataDir,
       headless: this.config.headless,
       defaultViewport: {
         width: this.config.viewportWidth,
@@ -68,6 +85,13 @@ export class BrowserController implements BrowserActions {
         "--disable-translate",
         "--metrics-recording-only",
         "--no-first-run",
+        "--disable-save-password-bubble",
+        "--disable-popup-blocking",
+        "--disable-notifications",
+        "--disable-infobars",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--disable-features=Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,CalculateNativeWinOcclusion,InterestFeedContentSuggestions,CertificateTransparencyComponentUpdater,AutofillServerCommunication,PrivacySandboxSettings4,AcceptCHFrame,AutoExpandDetailsElement,CorsOptIn,DesktopPWAsWithoutExtensions,DropInputEventsBeforeFirstPaint,ExperimentalThirdPartyStoragePartitioning,FedCm,FedCmWithoutThirdPartyCookies,FreeUpMemory,LiveCaption,MediaFoundationClear,MetricsReporting,TextBasedAudioDescription,WinrtGeolocationImplementation,PasswordManager,AutofillProfileServerNetworkRequests,PasswordLeakDetection,InsecurePasswordWarning,SafeBrowsing,SafeBrowsingEnhancedProtection,CredentialProvider",
         `--window-size=${this.config.viewportWidth},${this.config.viewportHeight}`,
       ],
     });
@@ -77,6 +101,30 @@ export class BrowserController implements BrowserActions {
 
     this.page.setDefaultNavigationTimeout(this.config.stepTimeout);
     this.page.setDefaultTimeout(this.config.stepTimeout);
+
+    // Inject CSS to hide common overlays (cookies, password managers, etc.)
+    await this.page.evaluateOnNewDocument(() => {
+      const style = document.createElement("style");
+      style.innerHTML = `
+        [id*="cookie-banner" i], [class*="cookie-banner" i],
+        [id*="cookie-consent" i], [class*="cookie-consent" i],
+        [id*="cookie-notice" i], [class*="cookie-notice" i],
+        [id*="cookie-popup" i], [class*="cookie-popup" i],
+        [id*="gdpr" i], [class*="gdpr" i],
+        [id*="onetrust" i], [class*="onetrust" i],
+        [id*="ez-cookie" i], [class*="ez-cookie" i],
+        #credential_picker_container,
+        iframe[src*="smartlock"] {
+          display: none !important;
+          z-index: -1 !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+      `;
+      document.addEventListener("DOMContentLoaded", () => {
+        document.head.appendChild(style);
+      });
+    });
 
     this.cdpClient = await this.page.createCDPSession();
 
