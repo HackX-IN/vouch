@@ -4,7 +4,7 @@ First off, thank you for considering contributing to Vouch! It's people like you
 
 ## Where do I go from here?
 
-If you've noticed a bug or have a feature request, make sure to check our [Issues](https://github.com/vouch-qa/vouch/issues) first to see if someone else has already created a ticket. If not, go ahead and create one!
+If you've noticed a bug or have a feature request, make sure to check our [Issues](https://github.com/HackX-IN/vouch/issues) first to see if someone else has already created a ticket. If not, go ahead and create one!
 
 ## Fork & create a branch
 
