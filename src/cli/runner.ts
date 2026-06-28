@@ -105,8 +105,10 @@ export async function runTestFile(
 
       logger.stepEnd(stepResult);
 
-      // If a critical step fails, we could choose to abort
-      // For now, continue executing remaining steps
+      // Abort the test execution immediately on failure
+      if (stepResult.status === "failed") {
+        break;
+      }
     }
   } catch (err) {
     logger.error(
