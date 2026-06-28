@@ -20,14 +20,15 @@ export class GoogleProvider extends BaseProvider {
   async analyze(
     systemPrompt: string,
     stepInstruction: string,
-    screenReaderOutput: string,
+    imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
     const userMessage = buildUserMessage(
       stepInstruction,
-      historyLedger,
-      screenReaderOutput,
+      historyLedger
     );
+
+    const base64Image = imageBuffer.toString("base64");
     const generativeModel = this.genAI.getGenerativeModel({
       model: this.model,
       systemInstruction: systemPrompt,
@@ -39,6 +40,12 @@ export class GoogleProvider extends BaseProvider {
 
     const result = await generativeModel.generateContentStream([
       { text: userMessage },
+      {
+        inlineData: {
+          data: base64Image,
+          mimeType: "image/jpeg",
+        },
+      },
     ]);
 
     let accumulated = "";

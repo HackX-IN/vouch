@@ -21,7 +21,7 @@ If this is something you think you can fix, then fork Vouch and create a branch 
 ## Guidelines
 
 - Keep it blazing fast. Vouch is designed for low latency. Ensure new features do not slow down the critical Actor-Critic loop.
-- Avoid CSS selectors and DOM queries. Vouch operates exclusively via the Chrome Accessibility Tree.
+- Avoid CSS selectors, DOM queries, and Accessibility Trees. Vouch operates exclusively via pure vision-canvas rendering with VLMs.
 - Format code using Prettier and ensure \`npm run lint\` passes without errors.
 
 ## Pull Requests

@@ -2,18 +2,18 @@
 
 **Zero-selector, vision-driven web automation. Blazing fast.**
 
-Vouch acts like a human QA engineer — it reads the screen via Chrome's Accessibility Tree, understands UI components through AI, and interacts by clicking and typing at exact coordinates. No DOM, no selectors, no XPaths.
+Vouch acts like a human QA engineer — it reads the screen purely visually as a canvas using a Vision Language Model (VLM), understands UI components through AI, and interacts by clicking and typing at exact coordinates. No DOM, no selectors, no XPaths, and no Accessibility Trees.
 
 ## Features
 
-- 🧠 **AI-Powered Engine** — Uses GPT-4o, Claude, Gemini, or local Ollama models (like qwen2.5-coder) to interpret the UI.
-- 🎯 **Zero Selectors** — No CSS, XPath, or DOM queries. Navigates natively via Chrome's Accessibility API.
+- 🧠 **AI-Powered Engine** — Uses GPT-4o, Claude, Gemini, or local Ollama VLMs (like qwen3-vl:2b-instruct) to interpret the UI.
+- 🎯 **Zero Selectors** — No CSS, XPath, DOM queries, or Accessibility Tree traversal. Navigates natively via pure visual coordinate extraction.
 - 🔄 **Self-Healing** — Actor-Critic loop auto-corrects form validation errors and retries failed steps.
 - 📝 **Plain English Tests** — Write tests in natural language with typo tolerance in `.vch` files.
 - 📁 **Smart Inputs** — Natively handles file uploads, calendars, dropdowns, hover, scroll, and keypresses.
 - 📊 **JSON Reports** — Auto-generated timestamped JSON reports under `.vouch/reports/`.
-- 🎥 **Video Recording** — Full session video capture via `puppeteer-screen-recorder`.
-- ⚡ **Low-Latency** — Persistent CDP sessions, batched AX tree resolution, instant typing, and optimized token usage.
+- 🎥 **Video Recording** — Full session video capture via Playwright's native context recording.
+- ⚡ **Low-Latency** — Warm Playwright Browser singletons, asset-blocking, and optimized ephemeral contexts for sub-2-second steps.
 - 🖥️ **Interactive CLI** — Daytona-style interactive console with spinners, file search, and guided execution.
 
 ## Quick Start
@@ -66,7 +66,7 @@ Create `vouch.config.json` in your project root (auto-created on first run):
 ```json
 {
   "provider": "ollama",
-  "model": "qwen2.5-coder:3b",
+  "model": "qwen3-vl:2b-instruct",
   "viewportWidth": 1280,
   "viewportHeight": 800,
   "headless": false,
@@ -114,21 +114,21 @@ vouch run test.vch \
 ## Architecture
 
 ```
-Accessibility Tree → VisionQA Engine (AI) → Action JSON → Browser Controller → Verify
+Viewport Image → VisionQA Engine (AI) → Action JSON → Browser Controller → Verify
                                          ↑                                     ↓
                                     Self-Heal ← ── Validation Error Detected ←─┘
 ```
 
 The **Actor-Critic Loop**:
 
-1. **Actor**: Reads the accessibility tree → sends to AI → executes the returned action.
+1. **Actor**: Captures the viewport as an image buffer → sends to VLM → executes the returned action on exact hardware pixels.
 2. **Critic**: Validates the result on `@assert` steps or when validation errors block progress, triggering self-healing retries.
 
 ### Performance Optimizations
 
-- **Persistent CDP session** — reused across all accessibility reads (no create/detach overhead per step).
-- **Batched box model resolution** — all element coordinates resolved in parallel via `Promise.allSettled`.
-- **Instant keyboard typing** — zero per-character delay.
+- **Warm Singleton Browser** — reused globally to eliminate cold starts for new contexts.
+- **Heavy Asset Blocking** — prevents non-structural media, fonts, and analytics from loading for faster visual settles.
+- **Instant keyboard typing** — zero per-character delay via native Playwright inputs.
 - **Token-optimized prompts** — compressed system prompt and dense history ledger format.
 - **`keep_alive`** — keeps Ollama models hot in VRAM between calls.
 - **`domcontentloaded`** — faster navigation without waiting for all network requests.

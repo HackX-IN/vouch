@@ -3,12 +3,13 @@
  * Token-optimized for faster response and lower cost.
  */
 
-export const VISION_QA_SYSTEM_PROMPT = `QA engine. Input: instruction, UI tree, history. Output: JSON only.
-Grid: 0-1000. Format: role "name" v="val" @x,y
+export const VISION_QA_SYSTEM_PROMPT = `QA engine. Input: instruction, viewport image, history. Output: JSON only.
+Grid: 0-1000.
 Rules: fix typos, self-heal from history, detect validation errors, use 'complete' when done, 'fail' if stuck.
-IMPORTANT: Set "targetElement" to the EXACT "name" string from the UI tree for the element you are interacting with. Copy the name exactly as it appears in quotes. For icons, SVGs, or elements missing from the UI tree, leave "targetElement" empty ("") and provide precise "x" and "y" coordinates for clicking.
-{"reasoning":"...","action":"click|doubleClick|type|wait|scroll|hover|keypress|select|upload|complete|fail","x":0,"y":0,"textPayload":"","detectedValidationError":"","targetElement":"exact name from UI tree or empty string"}`;
-
+IMPORTANT: You are a Vision Language Model. You must locate the target elements in the image visually. Return normalized coordinate points as a bounding box [xmin, ymin, xmax, ymax] between 0-1000.
+If the instruction requires MULTIPLE interactions, return them sequentially in the "actions" array.
+If you cannot find the target or an action fails, you MUST provide a detailed explanation in the "reasoning" field describing EXACTLY what you see on the screen instead, why you think it failed, and what is currently visible.
+{"reasoning":"Detailed explanation of what you see and why...","actions":[{"action":"click|doubleClick|type|wait|scroll|hover|keypress|complete|fail","box":[xmin,ymin,xmax,ymax],"textPayload":""}],"detectedValidationError":""}`;
 
 export function buildUserMessage(
   stepInstruction: string,
@@ -22,21 +23,16 @@ export function buildUserMessage(
     error?: string;
     detectedValidationError?: string;
   }>,
-  screenReaderOutput: string
 ): string {
   const parts: string[] = [];
 
   parts.push(`INSTRUCTION: ${stepInstruction}`);
 
-  if (screenReaderOutput) {
-    parts.push(`\n${screenReaderOutput}`);
-  }
-
   if (historyLedger.length > 0) {
     parts.push(`\nHISTORY:`);
     for (const e of historyLedger) {
       parts.push(
-        `#${e.attempt}: ${e.action}@${e.x},${e.y}${e.textPayload ? ` t=${e.textPayload}` : ""} -> ${e.success ? "OK" : "FAIL"}${e.error ? ` err=${e.error}` : ""}${e.detectedValidationError ? ` val=${e.detectedValidationError}` : ""}`
+        `#${e.attempt}: ${e.action}@${e.x},${e.y}${e.textPayload ? ` t=${e.textPayload}` : ""} -> ${e.success ? "OK" : "FAIL"}${e.error ? ` err=${e.error}` : ""}${e.detectedValidationError ? ` val=${e.detectedValidationError}` : ""}`,
       );
     }
   }

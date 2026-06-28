@@ -4,18 +4,10 @@
 @navigate https://the-internet.herokuapp.com/login
 
 # Enter username
-click on the username input field
-type tomsmith into the username field
-
-# Enter password
-click on the password input field
-type SuperSecretPassword! into the password field
-
-# Submit the form
-click on the login button
+type tomsmith into the username field, type SuperSecretPassword! into the password field, click on the login button
 
 # Wait for page to load after login
-@wait 2000
+@wait 500
 
 # Verify the secure area page loaded
 @assert Secure Area page is visible with logout button

@@ -23,14 +23,15 @@ export class OpenAIProvider extends BaseProvider {
   async analyze(
     systemPrompt: string,
     stepInstruction: string,
-    screenReaderOutput: string,
+    imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
     const userMessage = buildUserMessage(
       stepInstruction,
-      historyLedger,
-      screenReaderOutput,
+      historyLedger
     );
+
+    const base64Image = imageBuffer.toString("base64");
 
     const stream = await this.client.chat.completions.create({
       model: this.model,
@@ -39,7 +40,19 @@ export class OpenAIProvider extends BaseProvider {
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: userMessage },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${base64Image}`,
+                detail: "high"
+              },
+            },
+          ],
+        },
       ],
     });
 

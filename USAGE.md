@@ -1,6 +1,6 @@
 # Complete Usage Guide for Vouch
 
-Vouch is a blazing-fast, zero-selector, vision-driven web automation framework. Unlike traditional tools like Playwright or Selenium, Vouch doesn't rely on CSS selectors or XPaths. Instead, it reads the screen via the **Accessibility Tree**, passes that semantic structure to an AI model, and predicts exact `x, y` pixel coordinates to click and interact with.
+Vouch is a blazing-fast, zero-selector, vision-driven web automation framework. Unlike traditional tools like Selenium, Vouch doesn't rely on CSS selectors, XPaths, or even the Accessibility Tree. Instead, it reads the screen purely visually as a canvas using a **Vision Language Model (VLM)**, and predicts exact `x, y` pixel coordinates to click and interact with via Playwright.
 
 ---
 
@@ -70,7 +70,7 @@ The behavior of Vouch is controlled by \`vouch.config.json\` located in the dire
 ```json
 {
   "provider": "ollama",
-  "model": "qwen2.5-coder:3b",
+  "model": "qwen3-vl:2b-instruct",
   "viewportWidth": 1280,
   "viewportHeight": 800,
   "headless": true,
@@ -90,7 +90,7 @@ Vouch supports cloud models and local infrastructure natively. You must set the 
 
 1. **Ollama (Local / Free)** 
    - Great for low latency offline testing.
-   - Requires Ollama running locally. (e.g. \`ollama run qwen2.5-coder:3b\`)
+   - Requires Ollama running locally. (e.g. \`ollama run qwen3-vl:2b-instruct\`)
    - **Provider:** \`ollama\`
 2. **OpenAI**
    - **Provider:** \`openai\` | **Model:** \`gpt-4o\` or \`gpt-4o-mini\`
@@ -143,7 +143,7 @@ By default, Vouch generates rich artifacts to help you debug test runs. These ar
 
 Vouch doesn't just blindly click things. It uses an **Actor-Critic AI architecture**:
 
-1. **Actor Phase:** Vouch compresses the Accessibility Tree of the web page and sends it to the AI. The AI maps your instruction to the exact pixel coordinates of an element.
+1. **Actor Phase:** Vouch captures a 50% JPEG buffer of the web page viewport and sends it to the VLM. The AI maps your instruction to the exact bounding box and pixel coordinates of an element.
 2. **Action Phase:** Vouch physically moves the mouse to the pixels and executes the click or keystroke.
 3. **Critic Phase:** If you use an \`@assert\` command, or if the form validation fails (e.g., a visible red error appears saying "Password too short"), Vouch's Critic kicks in. The Critic evaluates the failure, rewrites the history ledger, and **automatically retries** the step with a corrected strategy.
 

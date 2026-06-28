@@ -27,21 +27,37 @@ export class AnthropicProvider extends BaseProvider {
   async analyze(
     systemPrompt: string,
     stepInstruction: string,
-    screenReaderOutput: string,
+    imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
     const userMessage = buildUserMessage(
       stepInstruction,
-      historyLedger,
-      screenReaderOutput,
+      historyLedger
     );
+
+    const base64Image = imageBuffer.toString("base64");
 
     const stream = this.client.messages.stream({
       model: this.model,
       max_tokens: 1024,
       temperature: 0.1,
       system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/jpeg",
+                data: base64Image,
+              },
+            },
+            { type: "text", text: userMessage },
+          ],
+        },
+      ],
     });
 
     let accumulated = "";

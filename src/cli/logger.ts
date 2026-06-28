@@ -116,7 +116,7 @@ export function createLogger(): Logger {
         } else if (result.status === "failed") {
           currentSpinner.fail(currentSpinner.text + c.dim(` ${durationStr}`));
           if (result.error)
-            console.log(c.dim(`     └─ `) + c.red(result.error.slice(0, 120)));
+            console.log(c.dim(`     └─ `) + c.red(result.error));
         } else {
           currentSpinner.stopAndPersist({
             symbol: c.dim(f.arrowRight),
@@ -132,11 +132,11 @@ export function createLogger(): Logger {
           if (c && f) {
             console.log(c.red(f.cross) + c.dim(` ${durationStr}`));
             if (result.error)
-              console.log(c.green(`     └─ ${result.error.slice(0, 120)}`));
+              console.log(c.green(`     └─ ${result.error}`));
           } else {
             console.log(` FAIL ${durationStr}`);
             if (result.error)
-              console.log(`     └─ ${result.error.slice(0, 120)}`);
+              console.log(`     └─ ${result.error}`);
           }
         } else {
           if (c && f) console.log(c.dim(f.arrowRight + " skipped"));

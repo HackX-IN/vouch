@@ -12,7 +12,7 @@ export abstract class BaseProvider implements AIProviderClient {
   abstract analyze(
     systemPrompt: string,
     stepInstruction: string,
-    screenReaderOutput: string,
+    imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse>;
 
@@ -43,12 +43,46 @@ export abstract class BaseProvider implements AIProviderClient {
       }
     }
 
+    let actions: any[] = [];
+    if (Array.isArray(parsed.actions)) {
+      actions = parsed.actions.map(a => {
+        let x = 500, y = 500;
+        if (Array.isArray(a.box) && a.box.length === 4) {
+          const [xmin, ymin, xmax, ymax] = a.box;
+          x = Math.round((Number(xmin) + Number(xmax)) / 2);
+          y = Math.round((Number(ymin) + Number(ymax)) / 2);
+        } else {
+          x = Math.round(Number(a.x ?? 500));
+          y = Math.round(Number(a.y ?? 500));
+        }
+        return {
+          action: String(a.action ?? "fail"),
+          x,
+          y,
+          textPayload: String(a.textPayload ?? "")
+        };
+      });
+    } else {
+      let x = 500, y = 500;
+      if (Array.isArray(parsed.box) && parsed.box.length === 4) {
+        const [xmin, ymin, xmax, ymax] = parsed.box;
+        x = Math.round((Number(xmin) + Number(xmax)) / 2);
+        y = Math.round((Number(ymin) + Number(ymax)) / 2);
+      } else {
+        x = Math.round(Number(parsed.x ?? 500));
+        y = Math.round(Number(parsed.y ?? 500));
+      }
+      actions.push({
+        action: String(parsed.action ?? "fail"),
+        x,
+        y,
+        textPayload: String(parsed.textPayload ?? "")
+      });
+    }
+
     return {
       reasoning: String(parsed.reasoning ?? ""),
-      action: String(parsed.action ?? "fail"),
-      x: Math.round(Number(parsed.x ?? 500)),
-      y: Math.round(Number(parsed.y ?? 500)),
-      textPayload: String(parsed.textPayload ?? ""),
+      actions,
       detectedValidationError: String(parsed.detectedValidationError ?? ""),
     };
   }

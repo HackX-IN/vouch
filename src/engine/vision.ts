@@ -86,7 +86,7 @@ export class VisionQAEngine {
    */
   async analyze(
     stepInstruction: string,
-    screenReaderOutput: string,
+    imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
     if (!stepInstruction?.trim()) {
@@ -98,7 +98,7 @@ export class VisionQAEngine {
     return this.provider.analyze(
       VISION_QA_SYSTEM_PROMPT,
       stepInstruction,
-      screenReaderOutput,
+      imageBuffer,
       historyLedger,
     );
   }
@@ -127,8 +127,8 @@ export class VisionQAEngine {
    * Evaluates if an execution outcome requires terminating the processing sequence.
    */
   public isTerminal(response: VisionQAResponse): boolean {
-    if (!response || !response.action) return false;
-    return (TERMINAL_ACTIONS as readonly string[]).includes(response.action);
+    if (!response || !response.actions || response.actions.length === 0) return false;
+    return response.actions.some(a => (TERMINAL_ACTIONS as readonly string[]).includes(a.action));
   }
 
   /**

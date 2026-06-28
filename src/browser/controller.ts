@@ -1,181 +1,118 @@
-import puppeteer, { type Browser, type Page, type CDPSession } from "puppeteer";
-import { PuppeteerScreenRecorder } from "puppeteer-screen-recorder";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+  type Route,
+} from "playwright";
 import * as fs from "node:fs";
-import * as path from "node:path";
-import * as os from "node:os";
+import { URL } from "node:url";
 import type { BrowserActions, VouchConfig } from "../types/index.js";
 
-const SKIP_ROLES = new Set([
-  "none",
-  "generic",
-  "InlineTextBox",
-  "LineBreak",
-  "paragraph",
-  "Section",
-  "group",
-  "document",
-  "WebArea",
-  "main",
-  "navigation",
-  "banner",
-  "contentinfo",
-  "complementary",
-  "list",
-  "listitem",
-  "StaticText",
-  "rootWebArea",
-]);
-
-interface CachedElement {
-  normX: number;
-  normY: number;
-  role: string;
-  name: string;
-}
+// Global singleton browser instance to prevent cold-starts across visual crawls
+let globalBrowser: Browser | null = null;
 
 /**
- * Enhanced Puppeteer-based browser controller.
- * Operates at low-latency via high-throughput batched CDP interactions.
+ * Playwright-based browser controller using a warm singleton architecture.
+ * Operates strictly on a vision-canvas basis without DOM interaction.
  */
 export class BrowserController implements BrowserActions {
-  private browser: Browser | null = null;
+  private context: BrowserContext | null = null;
   private page: Page | null = null;
-  private cdpClient: CDPSession | null = null;
   private readonly config: VouchConfig;
-  private recorder: PuppeteerScreenRecorder | null = null;
   public videoPath: string | null = null;
-
-  /** Maps normalized keys to an array of elements to handle duplicate naming strategies safely */
-  private lastElementMap: Map<string, CachedElement[]> = new Map();
 
   constructor(config: VouchConfig) {
     this.config = config;
   }
 
+  /**
+   * Initializes the warm singleton browser instance if not already running.
+   * Creates a fresh, isolated Browser Context for the session.
+   */
   async launch(): Promise<void> {
-    const userDataDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vouch-browser-"),
-    );
-    const defaultDir = path.join(userDataDir, "Default");
-    fs.mkdirSync(defaultDir, { recursive: true });
-
-    // Inject Chrome preferences to strictly disable password manager and leak detection
-    const preferences = {
-      profile: { password_manager_enabled: false },
-      credentials_enable_service: false,
-      password_manager: { leak_detection: false },
-      safebrowsing: { enabled: false, enhanced: false },
-      search: { suggest_enabled: false },
-      autofill: { profile_enabled: false, credit_card_enabled: false },
-    };
-    fs.writeFileSync(
-      path.join(defaultDir, "Preferences"),
-      JSON.stringify(preferences),
-    );
-
-    this.browser = await puppeteer.launch({
-      userDataDir,
-      headless: this.config.headless,
-      defaultViewport: {
-        width: this.config.viewportWidth,
-        height: this.config.viewportHeight,
-      },
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--disable-sync",
-        "--disable-translate",
-        "--metrics-recording-only",
-        "--no-first-run",
-        "--disable-save-password-bubble",
-        "--disable-popup-blocking",
-        "--disable-notifications",
-        "--disable-infobars",
-        "--password-store=basic",
-        "--use-mock-keychain",
-        "--disable-features=Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,CalculateNativeWinOcclusion,InterestFeedContentSuggestions,CertificateTransparencyComponentUpdater,AutofillServerCommunication,PrivacySandboxSettings4,AcceptCHFrame,AutoExpandDetailsElement,CorsOptIn,DesktopPWAsWithoutExtensions,DropInputEventsBeforeFirstPaint,ExperimentalThirdPartyStoragePartitioning,FedCm,FedCmWithoutThirdPartyCookies,FreeUpMemory,LiveCaption,MediaFoundationClear,MetricsReporting,TextBasedAudioDescription,WinrtGeolocationImplementation,PasswordManager,AutofillProfileServerNetworkRequests,PasswordLeakDetection,InsecurePasswordWarning,SafeBrowsing,SafeBrowsingEnhancedProtection,CredentialProvider",
-        `--window-size=${this.config.viewportWidth},${this.config.viewportHeight}`,
-      ],
-    });
-
-    const pages = await this.browser.pages();
-    this.page = pages[0] || (await this.browser.newPage());
-
-    this.page.setDefaultNavigationTimeout(this.config.stepTimeout);
-    this.page.setDefaultTimeout(this.config.stepTimeout);
-
-    // Inject CSS to hide common overlays (cookies, password managers, etc.)
-    await this.page.evaluateOnNewDocument(() => {
-      const style = document.createElement("style");
-      style.innerHTML = `
-        [id*="cookie-banner" i], [class*="cookie-banner" i],
-        [id*="cookie-consent" i], [class*="cookie-consent" i],
-        [id*="cookie-notice" i], [class*="cookie-notice" i],
-        [id*="cookie-popup" i], [class*="cookie-popup" i],
-        [id*="gdpr" i], [class*="gdpr" i],
-        [id*="onetrust" i], [class*="onetrust" i],
-        [id*="ez-cookie" i], [class*="ez-cookie" i],
-        #credential_picker_container,
-        iframe[src*="smartlock"] {
-          display: none !important;
-          z-index: -1 !important;
-          opacity: 0 !important;
-          pointer-events: none !important;
-        }
-      `;
-      document.addEventListener("DOMContentLoaded", () => {
-        document.head.appendChild(style);
-      });
-    });
-
-    this.cdpClient = await this.page.createCDPSession();
-
-    if (this.config.recordVideo) {
-      if (!fs.existsSync(this.config.videoDir)) {
-        fs.mkdirSync(this.config.videoDir, { recursive: true });
+    try {
+      // 1. Ensure global browser is warm
+      if (!globalBrowser) {
+        globalBrowser = await chromium.launch({
+          headless: this.config.headless,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--disable-translate",
+            "--metrics-recording-only",
+            "--no-first-run",
+            "--disable-popup-blocking",
+            "--disable-notifications",
+            "--disable-infobars",
+          ],
+        });
       }
-      this.videoPath = path.join(
-        this.config.videoDir,
-        `vouch-recording-${Date.now()}.mp4`,
-      );
-      const recorderOptions = {
-        followNewTab: true,
-        fps: 15,
-        quality: 60,
-        videoFrame: {
+
+      // 2. Prepare recording configuration if enabled
+      let recordVideo:
+        | { dir: string; size: { width: number; height: number } }
+        | undefined;
+      if (this.config.recordVideo) {
+        if (!fs.existsSync(this.config.videoDir)) {
+          fs.mkdirSync(this.config.videoDir, { recursive: true });
+        }
+        recordVideo = {
+          dir: this.config.videoDir,
+          size: {
+            width: this.config.viewportWidth,
+            height: this.config.viewportHeight,
+          },
+        };
+      }
+
+      // 3. Create fresh ephemeral context
+      this.context = await globalBrowser.newContext({
+        viewport: {
           width: this.config.viewportWidth,
           height: this.config.viewportHeight,
         },
-        videoBitrate: 800,
-        videoCrf: 28,
-      };
-      this.recorder = new PuppeteerScreenRecorder(this.page, recorderOptions);
-      await this.recorder.start(this.videoPath);
+        recordVideo,
+        ignoreHTTPSErrors: true,
+        reducedMotion: "reduce", // Enforce reduced motion accessibility settings natively
+      });
+
+      // 4. Create and configure page
+      this.page = await this.context.newPage();
+      this.page.setDefaultTimeout(this.config.stepTimeout);
+      this.page.setDefaultNavigationTimeout(this.config.stepTimeout);
+
+      if (this.config.recordVideo && this.page.video()) {
+        this.videoPath = await this.page.video()!.path();
+      }
+    } catch (error) {
+      await this.close();
+      throw new Error(
+        `Failed to launch browser context: ${(error as Error).message}`,
+      );
     }
   }
 
+  /**
+   * Cleans up the ephemeral context properly.
+   * The global Browser remains warm for future test runs.
+   */
   async close(): Promise<void> {
-    if (this.recorder) {
-      try {
-        await this.recorder.stop();
-      } catch {}
-      this.recorder = null;
-    }
-    if (this.cdpClient) {
-      try {
-        await this.cdpClient.detach();
-      } catch {}
-      this.cdpClient = null;
-    }
-    if (this.browser) {
-      try {
-        await this.browser.close();
-      } catch {}
-      this.browser = null;
-      this.page = null;
+    try {
+      if (this.page) {
+        await this.page.close().catch(() => {});
+        this.page = null;
+      }
+      if (this.context) {
+        await this.context.close().catch(() => {});
+        this.context = null;
+      }
+    } catch (error) {
+      console.error(`Error during browser close: ${(error as Error).message}`);
     }
   }
 
@@ -183,32 +120,116 @@ export class BrowserController implements BrowserActions {
     return this.videoPath;
   }
 
+  /**
+   * Validates URLs to prevent SSRF and execution attacks.
+   */
+  private validateUrl(targetUrl: string): void {
+    try {
+      const parsed = new URL(targetUrl);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("Invalid protocol. Only HTTP and HTTPS are permitted.");
+      }
+      // Simple localhost SSRF check - can be expanded based on environment needs
+      if (parsed.hostname === "169.254.169.254") {
+        throw new Error("AWS Metadata SSRF target blocked.");
+      }
+    } catch (e) {
+      throw new Error(`URL Validation Failed: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Navigates to target URL with performance optimizations.
+   * Blocks heavy assets (images, fonts, media, analytics) for <2s execution.
+   */
   async navigate(url: string): Promise<void> {
     this.assertPage();
-    // Navigate with a fast load lifecycle, then back it up with a visual paint check
-    await this.page!.goto(url, { waitUntil: "domcontentloaded" });
-    await this.waitForVisualSettle();
+    this.validateUrl(url);
+
+    try {
+      // Use page.route to block heavy non-structural assets
+      await this.page!.route("**/*", (route: Route) => {
+        const req = route.request();
+        const type = req.resourceType();
+        const urlStr = req.url().toLowerCase();
+
+        const isAnalytics =
+          urlStr.includes("google-analytics") ||
+          urlStr.includes("analytics") ||
+          urlStr.includes("mixpanel") ||
+          urlStr.includes("doubleclick") ||
+          urlStr.includes("tracker");
+
+        if (isAnalytics || ["image", "media", "font"].includes(type)) {
+          route.abort().catch(() => {});
+        } else {
+          route.continue().catch(() => {});
+        }
+      });
+
+      await this.page!.goto(url, { waitUntil: "domcontentloaded" });
+      await this.waitForVisualSettle();
+    } catch (error) {
+      throw new Error(`Navigation failed: ${(error as Error).message}`);
+    }
   }
 
+  /**
+   * Captures the current viewport as a JPEG buffer for the VLM.
+   * Forces 50% quality and disabled animations for performance.
+   */
+  async captureViewport(): Promise<Buffer> {
+    this.assertPage();
+    try {
+      return await this.page!.screenshot({
+        type: "jpeg",
+        quality: 30,
+        animations: "disabled", // Force disable CSS animations to prevent flakiness
+        fullPage: false, // Strictly viewport-bound interaction
+      });
+    } catch (error) {
+      throw new Error(
+        `Failed to capture viewport: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /** Hardware-level mouse click on specific coordinates */
   async click(pixelX: number, pixelY: number): Promise<void> {
     this.assertPage();
-    await this.page!.mouse.click(pixelX, pixelY);
-    await this.sleep(50);
+    try {
+      await this.page!.mouse.click(pixelX, pixelY);
+      await this.sleep(50);
+    } catch (e) {
+      throw new Error(`Click interaction failed: ${(e as Error).message}`);
+    }
   }
 
+  /** Hardware-level mouse double click */
   async doubleClick(pixelX: number, pixelY: number): Promise<void> {
     this.assertPage();
-    await this.page!.mouse.click(pixelX, pixelY, { count: 2 });
-    await this.sleep(50);
+    try {
+      await this.page!.mouse.click(pixelX, pixelY, { clickCount: 2 });
+      await this.sleep(50);
+    } catch (e) {
+      throw new Error(
+        `Double click interaction failed: ${(e as Error).message}`,
+      );
+    }
   }
 
+  /** Hardware-level type simulation with clearing */
   async type(pixelX: number, pixelY: number, text: string): Promise<void> {
     this.assertPage();
-    await this.page!.mouse.click(pixelX, pixelY, { count: 3 });
-    await this.sleep(50);
-    await this.page!.keyboard.press("Backspace");
-    await this.page!.keyboard.type(text, { delay: 0 });
-    await this.sleep(50);
+    try {
+      await this.page!.mouse.click(pixelX, pixelY, { clickCount: 3 });
+      await this.sleep(50);
+      await this.page!.keyboard.press("Backspace");
+      await this.page!.keyboard.type(text, { delay: 15 });
+      await this.sleep(50);
+    } catch (e) {
+      throw new Error(`Type interaction failed: ${(e as Error).message}`);
+    }
   }
 
   async wait(ms: number): Promise<void> {
@@ -222,159 +243,20 @@ export class BrowserController implements BrowserActions {
     };
   }
 
+  /** Exposes the Playwright Page if advanced escape hatches are strictly needed */
   getPage(): Page {
     this.assertPage();
     return this.page!;
   }
 
   /**
-   * Reads page using Chrome DevTools Protocol Accessibility API.
-   * Employs chunked network batch processing to eliminate socket saturation bottlenecks.
+   * Enforces asynchronous hydration tasks finish executing.
    */
-  async getScreenReaderOutput(): Promise<string> {
-    this.assertPage();
-    const client = this.cdpClient!;
-
-    const { nodes } = (await client.send("Accessibility.getFullAXTree")) as {
-      nodes: Array<{
-        role?: { value: string };
-        name?: { value: string };
-        value?: { value: string };
-        backendDOMNodeId?: number;
-      }>;
-    };
-
-    const { width: vw, height: vh } = this.getViewportSize();
-    const relevant: Array<{
-      role: string;
-      name: string;
-      value?: string;
-      backendNodeId: number;
-    }> = [];
-
-    for (const node of nodes) {
-      const role = node.role?.value;
-      const name = node.name?.value?.trim() || "";
-
-      if (!role || SKIP_ROLES.has(role)) continue;
-
-      if (
-        !name &&
-        role !== "image" &&
-        role !== "img" &&
-        role !== "graphics-document" &&
-        role !== "graphics-symbol" &&
-        role !== "button" &&
-        role !== "link"
-      ) {
-        continue;
-      }
-
-      const backendNodeId = node.backendDOMNodeId;
-      if (!backendNodeId) continue;
-
-      relevant.push({ role, name, value: node.value?.value, backendNodeId });
-    }
-
-    // Chunk CDP inquiries to protect the socket buffer (O(N) operations executed in bounded time)
-    const boxes: Array<PromiseSettledResult<{ content: number[] } | null>> = [];
-    const chunkSize = 45;
-
-    for (let i = 0; i < relevant.length; i += chunkSize) {
-      const chunk = relevant.slice(i, i + chunkSize);
-      const chunkPromises = chunk.map((n) =>
-        client
-          .send("DOM.getBoxModel", { backendNodeId: n.backendNodeId })
-          .then((r) => (r as { model: { content: number[] } }).model)
-          .catch(() => null),
-      );
-      const chunkResults = await Promise.allSettled(chunkPromises);
-      boxes.push(...chunkResults);
-    }
-
-    const results: string[] = [];
-    this.lastElementMap = new Map();
-
-    for (let i = 0; i < relevant.length; i++) {
-      const settled = boxes[i];
-      if (!settled || settled.status !== "fulfilled" || !settled.value)
-        continue;
-
-      const quad = settled.value.content;
-      const centerX = (quad[0] + quad[4]) / 2;
-      const centerY = (quad[1] + quad[5]) / 2;
-
-      if (centerX < 0 || centerY < 0 || centerX > vw || centerY > vh) continue;
-
-      const normX = Math.round((centerX / vw) * 1000);
-      const normY = Math.round((centerY / vh) * 1000);
-      const n = relevant[i];
-
-      let desc = n.name ? `${n.role} "${n.name}"` : `${n.role}`;
-      if (n.value) desc += ` v="${n.value}"`;
-      desc += ` @${normX},${normY}`;
-      results.push(desc);
-
-      if (n.name) {
-        const key = n.name.toLowerCase();
-        const currentList = this.lastElementMap.get(key) || [];
-        currentList.push({ normX, normY, role: n.role, name: n.name });
-        this.lastElementMap.set(key, currentList);
-      }
-    }
-
-    return results.length > 0 ? "UI:\n" + results.join("\n") : "UI: empty";
-  }
-
-  /**
-   * Resolves element locations from fuzzy query lookups.
-   * Gracefully down-ranks elements with distant layout offsets if multiple duplicates match.
-   */
-  resolveElement(targetName: string): { normX: number; normY: number } | null {
-    if (!targetName || this.lastElementMap.size === 0) return null;
-
-    const target = targetName.toLowerCase().trim();
-
-    // 1. Array-Safe Exact Match lookup (takes the first elements parsed up top)
-    if (this.lastElementMap.has(target)) {
-      return this.lastElementMap.get(target)![0];
-    }
-
-    // 2. Heavy Heuristic Substring Match
-    let bestMatch: CachedElement | null = null;
-    let bestScore = 0;
-
-    for (const [key, elements] of this.lastElementMap.entries()) {
-      let currentScore = 0;
-
-      if (key.includes(target)) {
-        currentScore = target.length / key.length;
-      } else if (target.includes(key)) {
-        currentScore = key.length / target.length;
-      }
-
-      if (currentScore > bestScore && elements.length > 0) {
-        bestScore = currentScore;
-        bestMatch = elements[0];
-      }
-    }
-
-    return bestMatch && bestScore >= 0.85
-      ? { normX: bestMatch.normX, normY: bestMatch.normY }
-      : null;
-  }
-
-  /**
-   * Monitors layout and thread stability before proceeding.
-   * Guarantees asynchronous hydration tasks finish executing.
-   */
-  private async waitForVisualSettle(): Promise<void> {
+  public async waitForVisualSettle(timeout: number = 3500): Promise<void> {
     try {
-      // Short poll for network activity to approach zero-state stability
-      await this.page!.waitForNetworkIdle({
-        timeout: 3500,
-        idleTime: 100,
-      }).catch(() => {});
+      await this.page!.waitForLoadState("networkidle", { timeout }).catch(
+        () => {},
+      );
       // Allow thread painting microtasks to clear
       await this.page!.evaluate(
         () =>
@@ -387,7 +269,7 @@ export class BrowserController implements BrowserActions {
 
   private assertPage(): void {
     if (!this.page) {
-      throw new Error("Browser not launched. Call launch() first.");
+      throw new Error("Browser Context is not launched. Call launch() first.");
     }
   }
 

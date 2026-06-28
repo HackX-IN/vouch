@@ -1,10 +1,8 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type {
   HistoryEntry,
   StepResult,
   TestStep,
-  VisionQAResponse,
+  VisionQAAction,
   VouchConfig,
 } from "../types/index";
 import { VisionQAEngine } from "../engine/vision.js";
@@ -87,11 +85,11 @@ export class ActionCoordinator {
           await this.browser.wait(this.config.actionDelay * attempt);
         }
 
-        const screenReader = await this.browser.getScreenReaderOutput();
+        const imageBuffer = await this.browser.captureViewport();
 
         let instruction =
           step.type === "assert"
-            ? `ASSERTION: "${step.instruction}". Carefully read the UI tree. If condition is visibly true, action="complete". If false/missing, action="fail". DO NOT guess.`
+            ? `ASSERTION: "${step.instruction}". Carefully read the UI viewport image. If condition is visibly true, action="complete". If false/missing, action="fail". DO NOT guess.`
             : step.instruction;
 
         if (currentCriticFeedback) {
@@ -100,23 +98,28 @@ export class ActionCoordinator {
 
         const response = await this.engine.analyze(
           instruction,
-          screenReader,
+          imageBuffer,
           history,
         );
 
+        const hasComplete = response.actions.some(
+          (a) => a.action === "complete",
+        );
+        const hasFail = response.actions.some((a) => a.action === "fail");
+
         const entry: HistoryEntry = {
           attempt,
-          action: response.action,
-          x: response.x,
-          y: response.y,
-          textPayload: response.textPayload || undefined,
+          action: response.actions[0]?.action ?? "fail",
+          x: response.actions[0]?.x ?? 0,
+          y: response.actions[0]?.y ?? 0,
+          textPayload: response.actions[0]?.textPayload || undefined,
           timestamp: Date.now(),
           success: false,
           detectedValidationError:
             response.detectedValidationError || undefined,
         };
 
-        if (response.action === "complete") {
+        if (hasComplete) {
           entry.success = true;
           history.push(entry);
           return {
@@ -127,7 +130,7 @@ export class ActionCoordinator {
           };
         }
 
-        if (response.action === "fail") {
+        if (hasFail) {
           entry.success = false;
           entry.error = response.reasoning;
           history.push(entry);
@@ -138,27 +141,29 @@ export class ActionCoordinator {
 
         if (step.type === "assert") {
           entry.success = false;
-          entry.error = `Invalid action for assert step: "${response.action}". Assert steps must evaluate to "complete" or "fail".`;
+          entry.error = `Invalid action for assert step: "${response.actions[0]?.action}". Assert steps must evaluate to "complete" or "fail".`;
           history.push(entry);
           currentCriticFeedback = entry.error;
           continue;
         }
 
-        // Execute action with fresh context mutation awareness
-        await this.dispatchAction(response, step);
-        await this.browser.wait(this.config.actionDelay);
+        // Execute actions with fresh context mutation awareness
+        for (const action of response.actions) {
+          if (action.action === "wait") {
+            continue;
+          }
+          await this.dispatchAction(action, step);
+          await this.browser.wait(this.config.actionDelay);
+        }
+
+        // Let the UI finish reacting/loading before we proceed to next step
+        await this.browser.waitForVisualSettle(2000);
 
         if (response.detectedValidationError) {
           entry.success = false;
           entry.error = `Validation error: ${response.detectedValidationError}`;
           history.push(entry);
           currentCriticFeedback = `The element interacted with raised a validation error: ${response.detectedValidationError}. Choose a different parameter or fix the field constraint.`;
-          continue;
-        }
-
-        if (response.action === "wait") {
-          entry.success = true;
-          history.push(entry);
           continue;
         }
 
@@ -192,10 +197,12 @@ export class ActionCoordinator {
       status: "failed",
       duration: Date.now() - startTime,
       attempts: history,
-      error: `Step execution failed after exhausting ${this.config.maxRetries} loops. Key Ledger Faults: ${history
-        .filter((h) => h.error)
-        .map((h) => `[Attempt ${h.attempt}]: ${h.error}`)
-        .join(" | ")}`,
+      error:
+        `Step execution failed after exhausting ${this.config.maxRetries} loops.\n` +
+        history
+          .filter((h) => h.error)
+          .map((h) => `     └─ [Attempt ${h.attempt}]: ${h.error}`)
+          .join("\n"),
     };
   }
 
@@ -204,46 +211,32 @@ export class ActionCoordinator {
    * Leverages precise bounding box heuristics over unreliable model predictions.
    */
   private async dispatchAction(
-    response: VisionQAResponse,
+    response: VisionQAAction,
     step: TestStep,
   ): Promise<void> {
     const { width, height } = this.browser.getViewportSize();
-    let pixelX: number;
-    let pixelY: number;
 
-    const targetQuery = response.targetElement !== undefined ? response.targetElement : step.instruction;
-    const resolved = this.browser.resolveElement(targetQuery);
-
-    if (resolved) {
-      pixelX = Math.round((resolved.normX / 1000) * width);
-      pixelY = Math.round((resolved.normY / 1000) * height);
-    } else {
-      const coords = this.engine.toPixelCoords(
-        response.x,
-        response.y,
-        width,
-        height,
-      );
-      pixelX = coords.pixelX;
-      pixelY = coords.pixelY;
-    }
+    const coords = this.engine.toPixelCoords(
+      response.x,
+      response.y,
+      width,
+      height,
+    );
+    const pixelX = coords.pixelX;
+    const pixelY = coords.pixelY;
 
     const page = this.browser.getPage();
-    let elementHandle: any = null;
 
     try {
-      elementHandle = await page
-        .evaluateHandle(
-          (x, y) => document.elementFromPoint(x, y),
-          pixelX,
-          pixelY,
-        )
-        .catch(() => null);
-
       switch (response.action) {
         case "click":
         case "select":
-          await this.browser.click(pixelX, pixelY);
+        case "fill":
+          if (response.action === "fill" && response.textPayload) {
+            await this.browser.type(pixelX, pixelY, response.textPayload);
+          } else {
+            await this.browser.click(pixelX, pixelY);
+          }
           break;
         case "doubleClick":
           await this.browser.doubleClick(pixelX, pixelY);
@@ -260,7 +253,7 @@ export class ActionCoordinator {
           await this.browser.wait(2000);
           break;
         case "scroll":
-          await page.mouse.wheel({ deltaY: response.y > 500 ? 300 : -300 });
+          await page.mouse.wheel(0, response.y > 500 ? 300 : -300);
           break;
         case "hover":
           await page.mouse.move(pixelX, pixelY);
@@ -274,28 +267,16 @@ export class ActionCoordinator {
           await page.keyboard.press(response.textPayload as any);
           break;
         case "upload":
-          if (elementHandle && response.textPayload) {
-            const fileInput = await elementHandle.asElement();
-            if (fileInput) {
-              await fileInput.uploadFile(response.textPayload);
-            } else {
-              await this.browser.click(pixelX, pixelY);
-            }
-          } else {
-            throw new Error(
-              `Upload execution failed: Missing valid DOM target handle or local path payload alignment.`,
-            );
-          }
-          break;
+          throw new Error(
+            "Upload action is disabled in pure vision-canvas architecture.",
+          );
         default:
           throw new Error(
             `Unsupported Action Exception: The VisionQA Engine emitted target action "${response.action}" which has no valid execution strategy.`,
           );
       }
     } finally {
-      if (elementHandle) {
-        await elementHandle.dispose().catch(() => {});
-      }
+      // Clean up resources if necessary in future
     }
   }
 }

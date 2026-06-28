@@ -6,15 +6,17 @@ export type ActionType = string;
 /** Terminal actions that signal the end of a step. */
 export const TERMINAL_ACTIONS = ["complete", "fail"] as const;
 
-export interface VisionQAResponse {
-  reasoning: string;
+export interface VisionQAAction {
   action: ActionType;
   x: number;
   y: number;
-  textPayload: string;
+  textPayload?: string;
+}
+
+export interface VisionQAResponse {
+  reasoning: string;
+  actions: VisionQAAction[];
   detectedValidationError: string;
-  /** Optional: the name/label of the target element from the UI tree */
-  targetElement?: string;
 }
 
 // ─── History Ledger ──────────────────────────────────────────────────
@@ -109,7 +111,7 @@ export const DEFAULT_CONFIG: VouchConfig = {
   viewportHeight: 800,
   headless: false,
   maxRetries: 3,
-  actionDelay: 200,
+  actionDelay: 300,
   stepTimeout: 30000,
   report: true,
   reportDir: "./.vouch/reports",
@@ -123,8 +125,8 @@ export interface AIProviderClient {
   analyze(
     systemPrompt: string,
     stepInstruction: string,
-    screenReaderOutput: string,
-    historyLedger: HistoryEntry[]
+    imageBuffer: Buffer,
+    historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse>;
 }
 
@@ -139,7 +141,9 @@ export interface BrowserActions {
   type(pixelX: number, pixelY: number, text: string): Promise<void>;
   wait(ms: number): Promise<void>;
   getViewportSize(): { width: number; height: number };
-  /** Uses Chrome Accessibility API (screen reader) to read the page — zero selectors. */
-  getScreenReaderOutput(): Promise<string>;
+  /** Captures the current viewport as a JPEG buffer for the VLM. */
+  captureViewport(): Promise<Buffer>;
+  /** Enforces asynchronous hydration tasks finish executing. */
+  waitForVisualSettle(timeout?: number): Promise<void>;
   getVideoPath(): string | null;
 }

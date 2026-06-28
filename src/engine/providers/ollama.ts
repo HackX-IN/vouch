@@ -23,14 +23,12 @@ export class OllamaProvider extends BaseProvider {
   async analyze(
     systemPrompt: string,
     stepInstruction: string,
-    screenReaderOutput: string,
+    imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
-    const userMessage = buildUserMessage(
-      stepInstruction,
-      historyLedger,
-      screenReaderOutput,
-    );
+    const userMessage = buildUserMessage(stepInstruction, historyLedger);
+
+    const base64Image = imageBuffer.toString("base64");
 
     const controller = new AbortController();
 
@@ -43,12 +41,17 @@ export class OllamaProvider extends BaseProvider {
         stream: true,
         keep_alive: "5m",
         options: {
-          temperature: 0.1,
+          temperature: 0,
           num_predict: 1024,
+          num_ctx: 2048,
         },
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
+          {
+            role: "user",
+            content: userMessage,
+            images: [base64Image],
+          },
         ],
       }),
     });
