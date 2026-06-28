@@ -20,7 +20,7 @@ Vouch acts like a human QA engineer — it reads the screen via Chrome's Accessi
 
 ```bash
 # Install
-npm install -g vouch-qa
+npm install -g vouch
 
 # Interactive Mode (Recommended)
 vouch
@@ -49,15 +49,15 @@ click the Login button
 
 ### Syntax
 
-| Prefix | Purpose | Example |
-|--------|---------|---------|
-| `>` | Metadata | `> name: My Test Suite` |
-| `#` | Comment | `# This is a comment` |
-| `@navigate` | Navigate to URL | `@navigate https://example.com` |
-| `@wait` | Wait (ms) | `@wait 3000` |
-| `@assert` | Visual assertion | `@assert Login form is visible` |
-| `@if` | Conditional | `@if dialog is visible` |
-| *(plain text)* | Action instruction | `click the blue submit button` |
+| Prefix         | Purpose            | Example                         |
+| -------------- | ------------------ | ------------------------------- |
+| `>`            | Metadata           | `> name: My Test Suite`         |
+| `#`            | Comment            | `# This is a comment`           |
+| `@navigate`    | Navigate to URL    | `@navigate https://example.com` |
+| `@wait`        | Wait (ms)          | `@wait 3000`                    |
+| `@assert`      | Visual assertion   | `@assert Login form is visible` |
+| `@if`          | Conditional        | `@if dialog is visible`         |
+| _(plain text)_ | Action instruction | `click the blue submit button`  |
 
 ## Configuration
 
@@ -82,13 +82,13 @@ Create `vouch.config.json` in your project root (auto-created on first run):
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
+| Variable         | Description                                             |
+| ---------------- | ------------------------------------------------------- |
 | `VOUCH_PROVIDER` | AI provider (`openai`, `anthropic`, `google`, `ollama`) |
-| `VOUCH_MODEL` | Model identifier |
-| `VOUCH_API_KEY` | API key for the provider |
-| `VOUCH_BASE_URL` | Base URL override |
-| `VOUCH_HEADLESS` | `true` or `false` |
+| `VOUCH_MODEL`    | Model identifier                                        |
+| `VOUCH_API_KEY`  | API key for the provider                                |
+| `VOUCH_BASE_URL` | Base URL override                                       |
+| `VOUCH_HEADLESS` | `true` or `false`                                       |
 
 ### CLI Flags
 
@@ -120,6 +120,7 @@ Accessibility Tree → VisionQA Engine (AI) → Action JSON → Browser Controll
 ```
 
 The **Actor-Critic Loop**:
+
 1. **Actor**: Reads the accessibility tree → sends to AI → executes the returned action.
 2. **Critic**: Validates the result on `@assert` steps or when validation errors block progress, triggering self-healing retries.
 
@@ -135,4 +136,3 @@ The **Actor-Critic Loop**:
 ## License
 
 MIT
-
