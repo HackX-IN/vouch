@@ -1,5 +1,5 @@
 {
-  "name": "vouch",
+  "name": "@hackx-in/vouch",
   "version": "1.0.0",
   "description": "Zero-selector, vision-driven web and desktop automation engine. Acts like a human QA engineer using AI-powered computer vision.",
   "main": "dist/index.js",

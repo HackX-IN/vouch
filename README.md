@@ -20,7 +20,7 @@ Vouch acts like a human QA engineer — it reads the screen via Chrome's Accessi
 
 ```bash
 # Install
-npm install -g vouch
+npm install -g @hackx-in/vouch
 
 # Interactive Mode (Recommended)
 vouch
