@@ -13,6 +13,8 @@ export interface VisionQAResponse {
   y: number;
   textPayload: string;
   detectedValidationError: string;
+  /** Optional: the name/label of the target element from the UI tree */
+  targetElement?: string;
 }
 
 // ─── History Ledger ──────────────────────────────────────────────────

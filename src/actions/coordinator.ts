@@ -35,7 +35,7 @@ export class ActionCoordinator {
   /**
    * Execute a single test step with self-healing retries.
    */
-  async executeStep(step: TestStep, isLastStep: boolean): Promise<StepResult> {
+  async executeStep(step: TestStep, isLastStep: boolean, criticFeedback?: string): Promise<StepResult> {
     const startTime = Date.now();
     const history: HistoryEntry[] = [];
 
@@ -83,10 +83,14 @@ export class ActionCoordinator {
         const screenReader = await this.browser.getScreenReaderOutput();
 
         // 2. Format instruction based on step type
-        const instruction =
+        let instruction =
           step.type === "assert"
-            ? `VERIFY: "${step.instruction}". If confirmed true/visible, respond "complete". If not, respond "fail" with reasoning.`
+            ? `ASSERTION: "${step.instruction}". Carefully read the UI tree. If condition is visibly true, action="complete". If false/missing, action="fail". DO NOT guess.`
             : step.instruction;
+            
+        if (criticFeedback) {
+          instruction += `\nCRITIC FEEDBACK FROM PREVIOUS ATTEMPT: ${criticFeedback}`;
+        }
 
         // 3. Send to VisionQA engine
         const response = await this.engine.analyze(
@@ -149,7 +153,7 @@ export class ActionCoordinator {
         }
 
         // 7. Execute the action for non-assert steps
-        await this.dispatchAction(response);
+        await this.dispatchAction(response, step);
 
         // 8. Post-action delay
         await this.browser.wait(this.config.actionDelay);
@@ -207,15 +211,33 @@ export class ActionCoordinator {
 
   /**
    * Dispatch any action to the browser — extensible, not a fixed set.
+   * 
+   * Smart Element Resolution: If the AI provides a targetElement name,
+   * we look up its real coordinates from the AX tree cache instead of
+   * trusting the model's guessed x,y. This makes small models reliable.
    */
-  private async dispatchAction(response: VisionQAResponse): Promise<void> {
+  private async dispatchAction(response: VisionQAResponse, step: TestStep): Promise<void> {
     const { width, height } = this.browser.getViewportSize();
-    const { pixelX, pixelY } = this.engine.toPixelCoords(
-      response.x,
-      response.y,
-      width,
-      height,
-    );
+    
+    // Smart resolution: prefer element name lookup over raw coordinates
+    let pixelX: number;
+    let pixelY: number;
+    
+    // First try the model's targetElement, then fallback to fuzzy matching the step instruction itself
+    const targetQuery = response.targetElement || step.instruction;
+    const resolved = this.browser.resolveElement(targetQuery);
+    
+    if (resolved) {
+      // Use the real coordinates from the AX tree
+      pixelX = Math.round((resolved.normX / 1000) * width);
+      pixelY = Math.round((resolved.normY / 1000) * height);
+    } else {
+      // Fallback to model's guessed coordinates
+      const coords = this.engine.toPixelCoords(response.x, response.y, width, height);
+      pixelX = coords.pixelX;
+      pixelY = coords.pixelY;
+    }
+    
     const page = this.browser.getPage();
 
     // 1. Resolve the exact DOM element at these coordinates for smarter interaction

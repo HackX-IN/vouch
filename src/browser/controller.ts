@@ -32,6 +32,8 @@ export class BrowserController implements BrowserActions {
   private config: VouchConfig;
   private recorder: PuppeteerScreenRecorder | null = null;
   public videoPath: string | null = null;
+  /** Caches element names → normalized coordinates from the last AX tree scan */
+  private lastElementMap: Map<string, { normX: number; normY: number; role: string; name: string }> = new Map();
 
   constructor(config: VouchConfig) {
     this.config = config;
@@ -169,7 +171,7 @@ export class BrowserController implements BrowserActions {
         name?: { value: string };
         value?: { value: string };
         backendDOMNodeId?: number;
-      }>;
+      }>
     };
 
     const { width: vw, height: vh } = this.getViewportSize();
@@ -203,8 +205,10 @@ export class BrowserController implements BrowserActions {
     );
     const boxes = await Promise.allSettled(boxPromises);
 
-    // Phase 3: Build compressed output — terse format saves ~40% tokens
+    // Phase 3: Build compressed output and element map
     const results: string[] = [];
+    this.lastElementMap = new Map();
+
     for (let i = 0; i < relevant.length; i++) {
       const settled = boxes[i];
       if (settled.status !== "fulfilled" || !settled.value) continue;
@@ -222,11 +226,64 @@ export class BrowserController implements BrowserActions {
       if (n.value) desc += ` v="${n.value}"`;
       desc += ` @${normX},${normY}`;
       results.push(desc);
+
+      // Store in element map for smart resolution
+      // Key by lowercased name for fuzzy matching
+      const key = n.name.toLowerCase();
+      if (!this.lastElementMap.has(key)) {
+        this.lastElementMap.set(key, { normX, normY, role: n.role, name: n.name });
+      }
     }
 
     return results.length > 0
       ? "UI:\n" + results.join("\n")
       : "UI: empty";
+  }
+
+  /**
+   * Resolve an element's real coordinates from the last AX tree scan.
+   * Uses fuzzy substring matching to handle slight naming mismatches.
+   * Returns normalized (0-1000) coordinates or null if no match.
+   */
+  resolveElement(targetName: string): { normX: number; normY: number } | null {
+    if (!targetName || this.lastElementMap.size === 0) return null;
+
+    const target = targetName.toLowerCase().trim();
+
+    // 1. Exact match
+    if (this.lastElementMap.has(target)) {
+      return this.lastElementMap.get(target)!;
+    }
+
+    // 2. Substring match — find elements whose name contains the target or vice versa
+    let bestMatch: { normX: number; normY: number } | null = null;
+    let bestScore = 0;
+
+    for (const [key, val] of this.lastElementMap.entries()) {
+      // Target is substring of element name
+      if (key.includes(target)) {
+        const score = target.length / key.length;
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = val;
+        }
+      }
+      // Element name is substring of target
+      if (target.includes(key)) {
+        const score = key.length / target.length;
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = val;
+        }
+      }
+    }
+
+    // Only accept if match quality is reasonable (>30%)
+    if (bestMatch && bestScore > 0.3) {
+      return bestMatch;
+    }
+
+    return null;
   }
 
   private assertPage(): void {

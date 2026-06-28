@@ -83,32 +83,53 @@ export async function runTestFile(
 
     // 4. Execute steps sequentially
     const actionSteps = suite.steps.filter((s) => s.type !== "comment");
+    let criticFeedback: string | undefined = undefined;
+    let backtrackCount = 0;
+    const MAX_BACKTRACKS = config.maxRetries;
+
     for (let i = 0; i < suite.steps.length; i++) {
       const step = suite.steps[i];
       const isLastActionStep = step === actionSteps[actionSteps.length - 1];
-      logger.stepStart(step);
-
-      const stepResult = await coordinator.executeStep(step, isLastActionStep);
-      result.results.push(stepResult);
-
-      switch (stepResult.status) {
-        case "passed":
-          result.totalPassed++;
-          break;
-        case "failed":
-          result.totalFailed++;
-          break;
-        case "skipped":
-          result.totalSkipped++;
-          break;
+      
+      if (!criticFeedback) {
+        logger.stepStart(step);
       }
 
-      logger.stepEnd(stepResult);
+      const stepResult = await coordinator.executeStep(step, isLastActionStep, criticFeedback);
+      criticFeedback = undefined;
 
-      // Abort the test execution immediately on failure
       if (stepResult.status === "failed") {
-        break;
+        // Backtrack Auto-Healing Logic
+        if (step.type === "assert" && backtrackCount < MAX_BACKTRACKS) {
+           let prevIndex = i - 1;
+           while (prevIndex >= 0 && (suite.steps[prevIndex].type === "comment" || suite.steps[prevIndex].type === "wait")) {
+             prevIndex--;
+           }
+           
+           if (prevIndex >= 0 && suite.steps[prevIndex].type !== "assert" && suite.steps[prevIndex].type !== "navigate") {
+             backtrackCount++;
+             logger.info(`\n  › ⚠️ Assertion failed. Auto-healing by backtracking to previous action (Attempt ${backtrackCount}/${MAX_BACKTRACKS})...`);
+             criticFeedback = `Your previous action failed to satisfy this assertion: "${step.instruction}". You MUST try clicking a completely DIFFERENT element or coordinate this time.`;
+             i = prevIndex - 1; // -1 because the loop will do i++ next
+             continue;
+           }
+        }
+
+        result.results.push(stepResult);
+        result.totalFailed++;
+        logger.stepEnd(stepResult);
+        continue; // Smartly move on to the next step on unrecoverable failure
       }
+
+      // Reset backtrack counter if the step passed
+      if (step.type === "assert") {
+        backtrackCount = 0; 
+      }
+
+      result.results.push(stepResult);
+      if (stepResult.status === "passed") result.totalPassed++;
+      if (stepResult.status === "skipped") result.totalSkipped++;
+      logger.stepEnd(stepResult);
     }
   } catch (err) {
     logger.error(
