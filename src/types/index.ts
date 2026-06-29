@@ -100,8 +100,14 @@ export interface VouchConfig {
   reportDir: string;
   /** Record video of the test session */
   recordVideo: boolean;
+  /** Automatically process and remove idle frames from video using FFmpeg */
+  consolidateVideo: boolean;
   /** Video output directory */
   videoDir: string;
+  /** Record Playwright trace of the test session */
+  recordTrace: boolean;
+  /** Trace output directory */
+  traceDir: string;
 }
 
 export const DEFAULT_CONFIG: VouchConfig = {
@@ -116,7 +122,10 @@ export const DEFAULT_CONFIG: VouchConfig = {
   report: true,
   reportDir: "./.vouch/reports",
   recordVideo: false,
+  consolidateVideo: false,
   videoDir: "./.vouch/videos",
+  recordTrace: true, // Enable tracing by default instead of video
+  traceDir: "./.vouch/traces",
 };
 
 // ─── AI Provider Interface ──────────────────────────────────────────

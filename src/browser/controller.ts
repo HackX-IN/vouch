@@ -6,6 +6,7 @@ import {
   type Route,
 } from "playwright";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { URL } from "node:url";
 import type { BrowserActions, VouchConfig } from "../types/index.js";
 
@@ -21,6 +22,7 @@ export class BrowserController implements BrowserActions {
   private page: Page | null = null;
   private readonly config: VouchConfig;
   public videoPath: string | null = null;
+  public tracePath: string | null = null;
 
   constructor(config: VouchConfig) {
     this.config = config;
@@ -86,6 +88,16 @@ export class BrowserController implements BrowserActions {
       this.page.setDefaultTimeout(this.config.stepTimeout);
       this.page.setDefaultNavigationTimeout(this.config.stepTimeout);
 
+      // 5. Start Tracing
+      if (this.config.recordTrace) {
+        if (!fs.existsSync(this.config.traceDir)) {
+          fs.mkdirSync(this.config.traceDir, { recursive: true });
+        }
+        await this.context.tracing.start({ screenshots: true, snapshots: true });
+      }
+      this.page.setDefaultTimeout(this.config.stepTimeout);
+      this.page.setDefaultNavigationTimeout(this.config.stepTimeout);
+
       if (this.config.recordVideo && this.page.video()) {
         this.videoPath = await this.page.video()!.path();
       }
@@ -108,6 +120,11 @@ export class BrowserController implements BrowserActions {
         this.page = null;
       }
       if (this.context) {
+        if (this.config.recordTrace) {
+          const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+          this.tracePath = path.join(this.config.traceDir, `trace-${timestamp}.zip`);
+          await this.context.tracing.stop({ path: this.tracePath }).catch(() => {});
+        }
         await this.context.close().catch(() => {});
         this.context = null;
       }
@@ -118,6 +135,10 @@ export class BrowserController implements BrowserActions {
 
   getVideoPath(): string | null {
     return this.videoPath;
+  }
+
+  getTracePath(): string | null {
+    return this.tracePath;
   }
 
   /**

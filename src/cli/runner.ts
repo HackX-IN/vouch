@@ -112,6 +112,8 @@ export async function runTestFile(
            
            if (prevIndex >= 0 && suite.steps[prevIndex].type !== "assert" && suite.steps[prevIndex].type !== "navigate") {
              backtrackCount++;
+             // Terminate the active spinner before printing backtrack info so it doesn't bleed into the retried step
+             logger.stepEnd({ step, status: "skipped", duration: 0, attempts: [] });
              logger.info(`\n  › ⚠️ Assertion failed. Auto-healing by backtracking to previous action (Attempt ${backtrackCount}/${MAX_BACKTRACKS})...`);
              criticFeedback = `Your previous action failed to satisfy this assertion: "${step.instruction}". You MUST try clicking a completely DIFFERENT element or coordinate this time.`;
              i = prevIndex - 1; // -1 because the loop will do i++ next
@@ -148,17 +150,24 @@ export async function runTestFile(
       const finalVideoPath = path.resolve(video);
       logger.info(`Video saved: ${finalVideoPath}`);
       
-      try {
-        logger.info("Consolidating video (removing idle VLM inference time)...");
-        const fastVideoPath = `${finalVideoPath}.fast.webm`;
-        // mpdecimate drops duplicate/idle frames, setpts resets the timestamps to play smoothly
-        await execAsync(`ffmpeg -i "${finalVideoPath}" -vf "mpdecimate,setpts=N/FRAME_RATE/TB" -y "${fastVideoPath}"`);
-        fs.renameSync(fastVideoPath, finalVideoPath);
-        logger.info("Video successfully consolidated!");
-      } catch (e) {
-        // FFmpeg is likely not installed or failed
-        logger.info("Note: Install FFmpeg on your system to automatically fast-forward and consolidate execution videos.");
+      if (config.consolidateVideo) {
+        try {
+          logger.info("Consolidating video (removing idle VLM inference time)...");
+          const fastVideoPath = `${finalVideoPath}.fast.webm`;
+          // mpdecimate drops duplicate/idle frames, setpts resets the timestamps to play smoothly
+          await execAsync(`ffmpeg -i "${finalVideoPath}" -vf "mpdecimate,setpts=N/FRAME_RATE/TB" -y "${fastVideoPath}"`);
+          fs.renameSync(fastVideoPath, finalVideoPath);
+          logger.info("Video successfully consolidated!");
+        } catch (e) {
+          // FFmpeg is likely not installed or failed
+          logger.info("Note: Install FFmpeg on your system to automatically fast-forward and consolidate execution videos.");
+        }
       }
+    }
+    const trace = browser.getTracePath();
+    if (trace) {
+      logger.info(`Trace saved: ${path.resolve(trace)}`);
+      logger.info(`Run 'npx playwright show-trace ${trace}' to view interactive playback.`);
     }
   }
 

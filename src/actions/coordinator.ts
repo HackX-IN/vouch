@@ -171,7 +171,9 @@ export class ActionCoordinator {
           (a) => a.action === "scroll" || a.action === "hover" || a.action === "wait"
         );
 
-        if (isNavigationalOnly && !hasComplete) {
+        const isExplicitNavCommand = /^(scroll|hover|wait)/i.test(step.instruction.trim());
+
+        if (isNavigationalOnly && !hasComplete && !isExplicitNavCommand) {
           entry.success = false;
           entry.error = `Action was purely navigational. Instruction not yet completed.`;
           history.push(entry);
@@ -270,9 +272,41 @@ export class ActionCoordinator {
         case "wait":
           await this.browser.wait(2000);
           break;
-        case "scroll":
-          await page.mouse.wheel(0, response.y > 500 ? 300 : -300);
+        case "scroll": {
+          const instruction = step.instruction.toLowerCase();
+          
+          // Handle absolute scrolling
+          if (instruction.includes("bottom") || instruction.includes("complete down")) {
+            await page.evaluate(async () => {
+              window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+              await new Promise((resolve) => setTimeout(resolve, 800));
+            });
+            break;
+          }
+          if (instruction.includes("top") || instruction.includes("complete up")) {
+            await page.evaluate(async () => {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+              await new Promise((resolve) => setTimeout(resolve, 800));
+            });
+            break;
+          }
+
+          const scrollMatch = step.instruction.match(/(\d+)/);
+          let scrollAmount = 300; // default 300px
+          if (scrollMatch && scrollMatch[1]) {
+            scrollAmount = parseInt(scrollMatch[1], 10);
+          }
+          
+          // Override VLM y-axis logic if explicit direction is provided
+          const isUp = instruction.includes("up");
+          const isDown = instruction.includes("down");
+          let direction = response.y > 500 ? 1 : -1;
+          if (isUp) direction = -1;
+          if (isDown) direction = 1;
+
+          await page.mouse.wheel(0, direction * scrollAmount);
           break;
+        }
         case "hover":
           await page.mouse.move(pixelX, pixelY);
           break;
