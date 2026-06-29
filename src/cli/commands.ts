@@ -80,7 +80,7 @@ export function createCLI(): Command {
       }
 
       const config = loadConfig(overrides);
-      const logger = createLogger();
+      const logger = createLogger(config);
 
       logger.info(
         `Provider: ${c.cyan(config.provider)} | Model: ${c.cyan(config.model)}`,

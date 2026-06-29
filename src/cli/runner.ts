@@ -1,5 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+const execAsync = promisify(exec);
+
 import type { TestRunResult, TestSuite, VouchConfig } from "../types/index";
 import { DEFAULT_CONFIG } from "../types/index";
 import { VisionQAEngine } from "../engine/vision.js";
@@ -141,7 +145,20 @@ export async function runTestFile(
     logger.info("Browser closed.");
     const video = browser.getVideoPath();
     if (video) {
-      logger.info(`Video saved: ${path.resolve(video)}`);
+      const finalVideoPath = path.resolve(video);
+      logger.info(`Video saved: ${finalVideoPath}`);
+      
+      try {
+        logger.info("Consolidating video (removing idle VLM inference time)...");
+        const fastVideoPath = `${finalVideoPath}.fast.webm`;
+        // mpdecimate drops duplicate/idle frames, setpts resets the timestamps to play smoothly
+        await execAsync(`ffmpeg -i "${finalVideoPath}" -vf "mpdecimate,setpts=N/FRAME_RATE/TB" -y "${fastVideoPath}"`);
+        fs.renameSync(fastVideoPath, finalVideoPath);
+        logger.info("Video successfully consolidated!");
+      } catch (e) {
+        // FFmpeg is likely not installed or failed
+        logger.info("Note: Install FFmpeg on your system to automatically fast-forward and consolidate execution videos.");
+      }
     }
   }
 
@@ -149,7 +166,15 @@ export async function runTestFile(
 
   // 6. Generate report
   if (config.report) {
-    const reportFile = generateJSONReport(result, config.reportDir);
+    // Consolidate the report payload by removing redundant suite.steps
+    const reportPayload = {
+      ...result,
+      suite: {
+        name: result.suite.name,
+        filePath: result.suite.filePath,
+      },
+    };
+    const reportFile = generateJSONReport(reportPayload, config.reportDir, config);
     logger.info(`Report generated: ${path.resolve(reportFile)}`);
   }
 

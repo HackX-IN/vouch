@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { initProject } from "./init.js";
 import { loadConfig, runTestFile } from "./runner.js";
-import { createLogger } from "./logger.js";
+import { createLogger, loadLoggerDeps } from "./logger.js";
 import type { VouchConfig } from "../types/index.js";
 
 function findVchFiles(dir: string, fileList: string[] = []): string[] {
@@ -126,7 +126,8 @@ export async function runInteractiveMenu() {
 
   p.outro("Starting tests...");
 
-  const logger = createLogger();
+  await loadLoggerDeps();
+  const logger = createLogger(config);
   let totalFailed = 0;
   for (const file of selectedFiles) {
     const result = await runTestFile(file, config, logger);

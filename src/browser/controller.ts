@@ -254,16 +254,16 @@ export class BrowserController implements BrowserActions {
    */
   public async waitForVisualSettle(timeout: number = 3500): Promise<void> {
     try {
-      await this.page!.waitForLoadState("networkidle", { timeout }).catch(
+      await this.page!.waitForLoadState("domcontentloaded", { timeout }).catch(
         () => {},
       );
       // Allow thread painting microtasks to clear
       await this.page!.evaluate(
         () =>
-          new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50))),
+          new Promise((r) => requestAnimationFrame(() => setTimeout(r, 150))),
       );
     } catch {
-      await this.sleep(250);
+      await this.sleep(150);
     }
   }
 

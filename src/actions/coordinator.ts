@@ -167,6 +167,18 @@ export class ActionCoordinator {
           continue;
         }
 
+        const isNavigationalOnly = response.actions.every(
+          (a) => a.action === "scroll" || a.action === "hover" || a.action === "wait"
+        );
+
+        if (isNavigationalOnly && !hasComplete) {
+          entry.success = false;
+          entry.error = `Action was purely navigational. Instruction not yet completed.`;
+          history.push(entry);
+          currentCriticFeedback = `You scrolled/hovered but did not finish the instruction. Examine the new viewport to find the target, or scroll again.`;
+          continue;
+        }
+
         entry.success = true;
         history.push(entry);
 
@@ -224,6 +236,12 @@ export class ActionCoordinator {
     );
     const pixelX = coords.pixelX;
     const pixelY = coords.pixelY;
+
+    if (pixelX < 0 || pixelX > width || pixelY < 0 || pixelY > height) {
+      throw new Error(
+        `Coordinate hallucination detected: Action targets (${pixelX}, ${pixelY}) which is outside viewport dimensions (${width}x${height}).`
+      );
+    }
 
     const page = this.browser.getPage();
 

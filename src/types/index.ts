@@ -111,7 +111,7 @@ export const DEFAULT_CONFIG: VouchConfig = {
   viewportHeight: 800,
   headless: false,
   maxRetries: 3,
-  actionDelay: 300,
+  actionDelay: 50,
   stepTimeout: 30000,
   report: true,
   reportDir: "./.vouch/reports",

@@ -5,6 +5,7 @@ import type {
   TestSuite,
 } from "../types/index.js";
 import type { Logger } from "./runner.js";
+import type { VouchConfig } from "../types/index.js";
 
 let chalk: any;
 let figures: any;
@@ -16,15 +17,24 @@ export async function loadLoggerDeps() {
   ora = await import("ora");
 }
 
-export function createLogger(): Logger {
+export function createLogger(config?: VouchConfig): Logger {
   const c: any = chalk?.default ?? chalk;
   const f: any = figures?.default ?? figures;
   const o: any = ora?.default ?? ora;
 
   let currentSpinner: any = null;
 
+  const maskSecret = (str: string) => {
+    if (!str) return str;
+    if (config?.apiKey && config.apiKey.trim().length > 0) {
+      return str.split(config.apiKey).join("***MASKED***");
+    }
+    return str;
+  };
+
   return {
     info(msg: string) {
+      msg = maskSecret(msg);
       if (currentSpinner) {
         currentSpinner.info(c.dim(msg));
         currentSpinner.start();
@@ -34,6 +44,7 @@ export function createLogger(): Logger {
       else console.log(`  > ${msg}`);
     },
     error(msg: string) {
+      msg = maskSecret(msg);
       if (currentSpinner) {
         currentSpinner.fail(c.red(msg));
         currentSpinner = null;
@@ -115,8 +126,9 @@ export function createLogger(): Logger {
           );
         } else if (result.status === "failed") {
           currentSpinner.fail(currentSpinner.text + c.dim(` ${durationStr}`));
-          if (result.error)
-            console.log(c.dim(`     └─ `) + c.red(result.error));
+          if (result.error) {
+            console.log(c.dim(`     └─ `) + c.red(maskSecret(result.error)));
+          }
         } else {
           currentSpinner.stopAndPersist({
             symbol: c.dim(f.arrowRight),
@@ -132,11 +144,11 @@ export function createLogger(): Logger {
           if (c && f) {
             console.log(c.red(f.cross) + c.dim(` ${durationStr}`));
             if (result.error)
-              console.log(c.green(`     └─ ${result.error}`));
+              console.log(c.green(`     └─ ${maskSecret(result.error)}`));
           } else {
             console.log(` FAIL ${durationStr}`);
             if (result.error)
-              console.log(`     └─ ${result.error}`);
+              console.log(`     └─ ${maskSecret(result.error)}`);
           }
         } else {
           if (c && f) console.log(c.dim(f.arrowRight + " skipped"));

@@ -113,13 +113,9 @@ export class VisionQAEngine {
     viewportWidth: number,
     viewportHeight: number,
   ): { pixelX: number; pixelY: number } {
-    // Confine calculations within bounded limits to prevent runtime browser execution failures
-    const safeX = Math.max(0, Math.min(1000, normalizedX));
-    const safeY = Math.max(0, Math.min(1000, normalizedY));
-
     return {
-      pixelX: Math.round((safeX / 1000) * viewportWidth),
-      pixelY: Math.round((safeY / 1000) * viewportHeight),
+      pixelX: Math.round((normalizedX / 1000) * viewportWidth),
+      pixelY: Math.round((normalizedY / 1000) * viewportHeight),
     };
   }
 
