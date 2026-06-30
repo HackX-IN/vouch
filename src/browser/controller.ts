@@ -73,12 +73,21 @@ export class BrowserController implements BrowserActions {
       }
 
       // 3. Create fresh ephemeral context
+      let storageState: string | undefined;
+      if (this.config.storageState) {
+        const statePath = path.resolve(this.config.storageState);
+        if (fs.existsSync(statePath)) {
+          storageState = statePath;
+        }
+      }
+
       this.context = await globalBrowser.newContext({
         viewport: {
           width: this.config.viewportWidth,
           height: this.config.viewportHeight,
         },
         recordVideo,
+        storageState,
         ignoreHTTPSErrors: true,
         reducedMotion: "reduce", // Enforce reduced motion accessibility settings natively
       });
@@ -120,6 +129,18 @@ export class BrowserController implements BrowserActions {
         this.page = null;
       }
       if (this.context) {
+        if (this.config.storageState) {
+          try {
+            const statePath = path.resolve(this.config.storageState);
+            const dir = path.dirname(statePath);
+            if (!fs.existsSync(dir)) {
+              fs.mkdirSync(dir, { recursive: true });
+            }
+            await this.context.storageState({ path: statePath });
+          } catch (error) {
+            console.error(`Failed to save storage state: ${(error as Error).message}`);
+          }
+        }
         if (this.config.recordTrace) {
           const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
           this.tracePath = path.join(this.config.traceDir, `trace-${timestamp}.zip`);

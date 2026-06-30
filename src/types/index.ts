@@ -132,6 +132,8 @@ export interface VouchConfig {
   screenshotDir: string;
   /** Enable verbose logging (shows AI reasoning, coordinates, timing breakdown) */
   verbose: boolean;
+  /** File path to save and load browser auth state (cookies and localStorage) */
+  storageState?: string;
 }
 
 export const DEFAULT_CONFIG: VouchConfig = {

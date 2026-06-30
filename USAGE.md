@@ -163,6 +163,24 @@ The behavior of Vouch is controlled by `vouch.config.json` located in the direct
 | `consolidateVideo` | `boolean` | `false` | Post-process video to strip idle frames (requires FFmpeg) |
 | `recordTrace` | `boolean` | `true` | Record Playwright trace for interactive debugging |
 | `traceDir` | `string` | `"./.vouch/traces"` | Trace output directory |
+| `storageState` | `string` | — | Path to save/load browser auth state (cookies/localStorage) |
+
+### Authentication & State Persistence
+
+To avoid logging into your app repeatedly, you can persist authentication cookies and `localStorage` across test runs using the `storageState` configuration.
+
+```json
+{
+  "storageState": "./.vouch/auth.json"
+}
+```
+
+Or via CLI flag:
+```bash
+vouch run test.vch --storage-state ./.vouch/auth.json
+```
+
+When the test completes, Vouch automatically saves the browser's current cookies and state into this file. On the next run, if the file exists, Vouch loads it, effectively starting the test already logged in.
 
 ### Supported Providers
 

@@ -255,6 +255,7 @@ vouch run test.vch \
   --provider openai \
   --model gpt-4o \
   --api-key sk-xxx \
+  --storage-state ./auth.json \
   --headless \
   --retries 5 \
   --viewport 1920x1080 \

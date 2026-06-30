@@ -64,6 +64,7 @@ export function createCLI(): Command {
     .option("--viewport <WxH>", "Viewport size (e.g., 1280x800)")
     .option("--no-report", "Skip JSON report generation")
     .option("--report-dir <dir>", "JSON report output directory")
+    .option("--storage-state <path>", "File path to save/load browser auth cookies and localStorage")
     .option("--dry-run", "Parse and validate the test file without executing it")
     .option("--verbose", "Enable verbose logging (shows AI reasoning, coordinates, and timing breakdown)")
     .action(async (file: string, options: Record<string, unknown>) => {
@@ -102,6 +103,7 @@ export function createCLI(): Command {
       if (options.model) overrides.model = options.model as string;
       if (options.apiKey) overrides.apiKey = options.apiKey as string;
       if (options.baseUrl) overrides.baseUrl = options.baseUrl as string;
+      if (options.storageState) overrides.storageState = options.storageState as string;
       if (typeof options.headless === "boolean")
         overrides.headless = options.headless;
       if (options.retries) overrides.maxRetries = options.retries as number;
