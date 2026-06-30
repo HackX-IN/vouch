@@ -56,7 +56,11 @@ export function loadConfig(overrides: Partial<VouchConfig> = {}): VouchConfig {
  * Validates a .vch file without executing it (dry-run mode).
  * Returns the parsed suite for inspection.
  */
-export function validateTestFile(filePath: string): { suite: TestSuite; valid: boolean; error?: string } {
+export function validateTestFile(filePath: string): {
+  suite: TestSuite;
+  valid: boolean;
+  error?: string;
+} {
   try {
     const suite = parseVchFile(filePath);
     return { suite, valid: true };
@@ -107,20 +111,53 @@ export async function runTestFile(
     logger.info("Browser ready.");
 
     // 4. Execute steps sequentially
-    const actionSteps = suite.steps.filter((s) => s.type !== "comment");
+    const actionSteps = suite.steps.filter((s) => s.type !== "comment" && s.type !== "conditional_end");
     let criticFeedback: string | undefined = undefined;
     let backtrackCount = 0;
     const MAX_BACKTRACKS = config.maxRetries;
+    let skipUntilEndif = false;
+    // Track the indices of steps that were ACTUALLY executed (not skipped)
+    // so the backtracker never jumps into a skipped @if block.
+    const executedIndices: number[] = [];
 
     for (let i = 0; i < suite.steps.length; i++) {
       const step = suite.steps[i];
       const isLastActionStep = step === actionSteps[actionSteps.length - 1];
-      
+
+      // ── Conditional block skip logic ──
+      // When @if evaluated to false, skip every step until we hit @endif
+      if (skipUntilEndif) {
+        if (step.type === "conditional_end") {
+          skipUntilEndif = false;
+        }
+        const skipResult: import("../types/index").StepResult = { step, status: "skipped", duration: 0, attempts: [] };
+        result.results.push(skipResult);
+        result.totalSkipped++;
+        logger.stepStart(step);
+        logger.stepEnd(skipResult);
+        continue;
+      }
+
+      // ── @endif when condition was TRUE ──
+      // The block ran, so @endif is just a structural closer — skip it silently
+      if (step.type === "conditional_end") {
+        const skipResult: import("../types/index").StepResult = { step, status: "skipped", duration: 0, attempts: [] };
+        result.results.push(skipResult);
+        result.totalSkipped++;
+        logger.stepStart(step);
+        logger.stepEnd(skipResult);
+        continue;
+      }
+
       if (!criticFeedback) {
         logger.stepStart(step);
       }
 
-      const stepResult = await coordinator.executeStep(step, isLastActionStep, criticFeedback);
+      const stepResult = await coordinator.executeStep(
+        step,
+        isLastActionStep,
+        criticFeedback,
+      );
       criticFeedback = undefined;
 
       // Accumulate timing
@@ -130,22 +167,48 @@ export async function runTestFile(
       }
 
       if (stepResult.status === "failed") {
+        // ── @if condition was false → skip the block ──
+        if (step.type === "conditional") {
+          skipUntilEndif = true;
+          const skipBranchResult: import("../types/index").StepResult = { ...stepResult, status: "skipped" };
+          result.results.push(skipBranchResult);
+          result.totalSkipped++;
+          logger.stepEnd(skipBranchResult);
+          continue;
+        }
+
         // Backtrack Auto-Healing Logic
+        // Only backtrack to steps that were actually EXECUTED (not skipped @if blocks)
         if (step.type === "assert" && backtrackCount < MAX_BACKTRACKS) {
-           let prevIndex = i - 1;
-           while (prevIndex >= 0 && (suite.steps[prevIndex].type === "comment" || suite.steps[prevIndex].type === "wait")) {
-             prevIndex--;
-           }
-           
-           if (prevIndex >= 0 && suite.steps[prevIndex].type !== "assert" && suite.steps[prevIndex].type !== "navigate") {
-             backtrackCount++;
-             // Terminate the active spinner before printing backtrack info so it doesn't bleed into the retried step
-             logger.stepEnd({ step, status: "skipped", duration: 0, attempts: [] });
-             logger.info(`\n  › ⚠️ Assertion failed. Auto-healing by backtracking to previous action (Attempt ${backtrackCount}/${MAX_BACKTRACKS})...`);
-             criticFeedback = `Your previous action failed to satisfy this assertion: "${step.instruction}". You MUST try clicking a completely DIFFERENT element or coordinate this time.`;
-             i = prevIndex - 1; // -1 because the loop will do i++ next
-             continue;
-           }
+          // Walk backwards through the executed-only index list to find a
+          // suitable action step to retry (not assert, navigate, or structural).
+          let backtrackTargetIndex = -1;
+          for (let k = executedIndices.length - 1; k >= 0; k--) {
+            const candidateIdx = executedIndices[k];
+            const candidate = suite.steps[candidateIdx];
+            if (
+              candidate.type === "action" &&
+              candidateIdx !== i
+            ) {
+              backtrackTargetIndex = candidateIdx;
+              break;
+            }
+          }
+          if (backtrackTargetIndex >= 0) {
+            backtrackCount++;
+            logger.stepEnd({
+              step,
+              status: "skipped",
+              duration: 0,
+              attempts: [],
+            });
+            logger.info(
+              `\n  › ⚠️ Assertion failed. Auto-healing by backtracking to previous action (Attempt ${backtrackCount}/${MAX_BACKTRACKS})...`,
+            );
+            criticFeedback = `Your previous action failed to satisfy this assertion: "${step.instruction}". You MUST try clicking a completely DIFFERENT element or coordinate this time.`;
+            i = backtrackTargetIndex - 1; // -1 because the loop will do i++ next
+            continue;
+          }
         }
 
         result.results.push(stepResult);
@@ -154,9 +217,9 @@ export async function runTestFile(
         continue; // Smartly move on to the next step on unrecoverable failure
       }
 
-      // Reset backtrack counter if the step passed
-      if (step.type === "assert") {
-        backtrackCount = 0; 
+      // Track this step as executed for the backtracker
+      if (step.type === "action" || step.type === "conditional") {
+        executedIndices.push(i);
       }
 
       result.results.push(stepResult);
@@ -176,33 +239,43 @@ export async function runTestFile(
     if (video) {
       const finalVideoPath = path.resolve(video);
       logger.info(`Video saved: ${finalVideoPath}`);
-      
+
       if (config.consolidateVideo) {
         try {
-          logger.info("Consolidating video (removing idle VLM inference time)...");
+          logger.info(
+            "Consolidating video (removing idle VLM inference time)...",
+          );
           const fastVideoPath = `${finalVideoPath}.fast.webm`;
           // mpdecimate drops duplicate/idle frames, setpts resets the timestamps to play smoothly
-          await execAsync(`ffmpeg -i "${finalVideoPath}" -vf "mpdecimate,setpts=N/FRAME_RATE/TB" -y "${fastVideoPath}"`);
+          await execAsync(
+            `ffmpeg -i "${finalVideoPath}" -vf "mpdecimate,setpts=N/FRAME_RATE/TB" -y "${fastVideoPath}"`,
+          );
           fs.renameSync(fastVideoPath, finalVideoPath);
           logger.info("Video successfully consolidated!");
         } catch (e) {
           // FFmpeg is likely not installed or failed
-          logger.info("Note: Install FFmpeg on your system to automatically fast-forward and consolidate execution videos.");
+          logger.info(
+            "Note: Install FFmpeg on your system to automatically fast-forward and consolidate execution videos.",
+          );
         }
       }
     }
     const trace = browser.getTracePath();
     if (trace) {
       logger.info(`Trace saved: ${path.resolve(trace)}`);
-      logger.info(`Run 'npx playwright show-trace ${trace}' to view interactive playback.`);
+      logger.info(
+        `Run 'npx playwright show-trace ${trace}' to view interactive playback.`,
+      );
     }
 
     // Log failure screenshots location if any were saved
     const failureScreenshots = result.results
-      .filter(r => r.failureScreenshot)
-      .map(r => r.failureScreenshot!);
+      .filter((r) => r.failureScreenshot)
+      .map((r) => r.failureScreenshot!);
     if (failureScreenshots.length > 0) {
-      logger.info(`📸 ${failureScreenshots.length} failure screenshot(s) saved to: ${path.resolve(config.screenshotDir)}`);
+      logger.info(
+        `📸 ${failureScreenshots.length} failure screenshot(s) saved to: ${path.resolve(config.screenshotDir)}`,
+      );
     }
   }
 
@@ -224,7 +297,11 @@ export async function runTestFile(
         filePath: result.suite.filePath,
       },
     };
-    const reportFile = generateJSONReport(reportPayload, config.reportDir, config);
+    const reportFile = generateJSONReport(
+      reportPayload,
+      config.reportDir,
+      config,
+    );
     logger.info(`Report generated: ${path.resolve(reportFile)}`);
   }
 

@@ -45,7 +45,7 @@ export interface TestStep {
   lineNumber: number;
   raw: string;
   instruction: string;
-  type: "navigate" | "action" | "assert" | "wait" | "conditional" | "comment";
+  type: "navigate" | "action" | "assert" | "wait" | "conditional" | "conditional_end" | "comment";
   meta?: Record<string, string>;
 }
 
@@ -165,6 +165,7 @@ export interface AIProviderClient {
     stepInstruction: string,
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
+    isAssertionLike?: boolean,
   ): Promise<VisionQAResponse>;
 }
 

@@ -14,6 +14,7 @@ export abstract class BaseProvider implements AIProviderClient {
     stepInstruction: string,
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
+    isAssertionLike?: boolean,
   ): Promise<VisionQAResponse>;
 
   /**

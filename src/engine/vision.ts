@@ -88,6 +88,7 @@ export class VisionQAEngine {
     stepInstruction: string,
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
+    isAssertionLike?: boolean,
   ): Promise<VisionQAResponse> {
     if (!stepInstruction?.trim()) {
       throw new Error(
@@ -100,6 +101,7 @@ export class VisionQAEngine {
       stepInstruction,
       imageBuffer,
       historyLedger,
+      isAssertionLike,
     );
   }
 

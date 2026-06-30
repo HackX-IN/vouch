@@ -26,6 +26,7 @@ export class OllamaProvider extends BaseProvider {
     stepInstruction: string,
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
+    isAssertionLike?: boolean,
   ): Promise<VisionQAResponse> {
     return this.withTiming(async () => {
       const userMessage = buildUserMessage(stepInstruction, historyLedger);
@@ -35,8 +36,14 @@ export class OllamaProvider extends BaseProvider {
       const controller = new AbortController();
 
       // Temperature decay: lower temperature on retries for more deterministic outputs
-      const retryCount = historyLedger.filter(h => !h.success).length;
-      const temperature = Math.max(0, 0.1 - (retryCount * 0.03));
+      const retryCount = historyLedger.filter((h) => !h.success).length;
+      const temperature = Math.max(0, 0.1 - retryCount * 0.03);
+
+      // Assertion/conditional steps only need ~20 tokens of JSON output
+      // (e.g. {"action":"complete","x":500,"y":500}). Drastically reduce
+      // num_predict and num_ctx to cut inference time by 50-70%.
+      const numPredict = isAssertionLike ? 256 : 1024;
+      const numCtx = isAssertionLike ? 1024 : 2048;
 
       const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
@@ -48,8 +55,8 @@ export class OllamaProvider extends BaseProvider {
           keep_alive: "5m",
           options: {
             temperature,
-            num_predict: 1024,
-            num_ctx: 2048,
+            num_predict: numPredict,
+            num_ctx: numCtx,
           },
           messages: [
             { role: "system", content: systemPrompt },
@@ -64,7 +71,9 @@ export class OllamaProvider extends BaseProvider {
 
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`Ollama request failed (${response.status}): ${errText}`);
+        throw new Error(
+          `Ollama request failed (${response.status}): ${errText}`,
+        );
       }
 
       // Stream tokens and abort the instant we have valid JSON

@@ -43,7 +43,7 @@ export class ActionCoordinator {
     let currentCriticFeedback = initialCriticFeedback;
     let totalInferenceMs = 0;
 
-    if (step.type === "comment") {
+    if (step.type === "comment" || step.type === "conditional_end") {
       return { step, status: "skipped", duration: 0, attempts: [] };
     }
 
@@ -89,10 +89,18 @@ export class ActionCoordinator {
           await this.browser.wait(this.config.actionDelay * attempt);
         }
 
+        // For conditional checks, wait for the page to fully settle before
+        // capturing a screenshot. This prevents false positives caused by
+        // auth redirects (e.g., storageState cookies triggering login→dashboard
+        // redirect that hasn't completed when we capture).
+        if (step.type === "conditional" && attempt === 1) {
+          await this.browser.waitForVisualSettle(1500);
+        }
+
         const imageBuffer = await this.browser.captureViewport();
 
         let instruction =
-          step.type === "assert"
+          step.type === "assert" || step.type === "conditional"
             ? `ASSERTION: "${step.instruction}". Carefully read the UI viewport image. If condition is visibly true, action="complete". If false/missing, action="fail". DO NOT guess.`
             : step.instruction;
 
@@ -100,10 +108,13 @@ export class ActionCoordinator {
           instruction += `\nCRITIC FEEDBACK FROM PREVIOUS ATTEMPT: ${currentCriticFeedback}`;
         }
 
+        const isAssertionLike = step.type === "assert" || step.type === "conditional";
+
         const response = await this.engine.analyze(
           instruction,
           imageBuffer,
           history,
+          isAssertionLike,
         );
 
         // Track inference time
@@ -153,9 +164,9 @@ export class ActionCoordinator {
           continue;
         }
 
-        if (step.type === "assert") {
+        if (step.type === "assert" || step.type === "conditional") {
           entry.success = false;
-          entry.error = `Invalid action for assert step: "${response.actions[0]?.action}". Assert steps must evaluate to "complete" or "fail".`;
+          entry.error = `Invalid action for ${step.type} step: "${response.actions[0]?.action}". These steps must evaluate to "complete" or "fail".`;
           history.push(entry);
           currentCriticFeedback = entry.error;
           continue;
@@ -182,10 +193,15 @@ export class ActionCoordinator {
         }
 
         const isNavigationalOnly = response.actions.every(
-          (a) => a.action === "scroll" || a.action === "hover" || a.action === "wait"
+          (a) =>
+            a.action === "scroll" ||
+            a.action === "hover" ||
+            a.action === "wait",
         );
 
-        const isExplicitNavCommand = /^(scroll|hover|wait)/i.test(step.instruction.trim());
+        const isExplicitNavCommand = /^(scroll|hover|wait)/i.test(
+          step.instruction.trim(),
+        );
 
         if (isNavigationalOnly && !hasComplete && !isExplicitNavCommand) {
           entry.success = false;
@@ -225,8 +241,11 @@ export class ActionCoordinator {
       }
     }
 
-    // Step exhausted all retries — save failure screenshot
-    const failureScreenshot = await this.saveFailureScreenshot(step);
+    // Step exhausted all retries — save failure screenshot (skip for conditionals, they're just branch checks)
+    const failureScreenshot =
+      step.type === "conditional"
+        ? undefined
+        : await this.saveFailureScreenshot(step);
     const totalDuration = Date.now() - startTime;
 
     return {
@@ -252,7 +271,9 @@ export class ActionCoordinator {
    * Saves a screenshot of the current viewport to disk on failure.
    * Returns the path to the saved screenshot, or undefined if saving fails.
    */
-  private async saveFailureScreenshot(step: TestStep): Promise<string | undefined> {
+  private async saveFailureScreenshot(
+    step: TestStep,
+  ): Promise<string | undefined> {
     if (!this.config.screenshotOnFailure) return undefined;
 
     try {
@@ -303,7 +324,7 @@ export class ActionCoordinator {
 
     if (pixelX < 0 || pixelX > width || pixelY < 0 || pixelY > height) {
       throw new Error(
-        `Coordinate hallucination detected: Action targets (${pixelX}, ${pixelY}) which is outside viewport dimensions (${width}x${height}).`
+        `Coordinate hallucination detected: Action targets (${pixelX}, ${pixelY}) which is outside viewport dimensions (${width}x${height}).`,
       );
     }
 
@@ -336,16 +357,25 @@ export class ActionCoordinator {
           break;
         case "scroll": {
           const instruction = step.instruction.toLowerCase();
-          
+
           // Handle absolute scrolling
-          if (instruction.includes("bottom") || instruction.includes("complete down")) {
+          if (
+            instruction.includes("bottom") ||
+            instruction.includes("complete down")
+          ) {
             await page.evaluate(async () => {
-              window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+              window.scrollTo({
+                top: document.body.scrollHeight,
+                behavior: "smooth",
+              });
               await new Promise((resolve) => setTimeout(resolve, 800));
             });
             break;
           }
-          if (instruction.includes("top") || instruction.includes("complete up")) {
+          if (
+            instruction.includes("top") ||
+            instruction.includes("complete up")
+          ) {
             await page.evaluate(async () => {
               window.scrollTo({ top: 0, behavior: "smooth" });
               await new Promise((resolve) => setTimeout(resolve, 800));
@@ -358,7 +388,7 @@ export class ActionCoordinator {
           if (scrollMatch && scrollMatch[1]) {
             scrollAmount = parseInt(scrollMatch[1], 10);
           }
-          
+
           // Override VLM y-axis logic if explicit direction is provided
           const isUp = instruction.includes("up");
           const isDown = instruction.includes("down");

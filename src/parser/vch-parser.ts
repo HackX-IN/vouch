@@ -158,7 +158,7 @@ export function parseVchFile(filePath: string): TestSuite {
         lineNumber,
         raw,
         instruction: "End of conditional block execution scope",
-        type: "action", // Evaluated as a passive closing tracking line item step
+        type: "conditional_end", // Structural marker — never sent to AI
       });
       continue;
     }
