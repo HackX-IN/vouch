@@ -5,9 +5,19 @@ All notable changes to Vouch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-06-30
+
+### Added
+- **Authentication & State Persistence**: Added `storageState` configuration and `--storage-state` CLI flag to save and load browser auth state (cookies/localStorage), skipping repetitive UI logins in E2E tests.
+
 ## [1.3.0] - 2026-06-30
 
 ### Added
+- **Temperature Decay**: AI providers now automatically lower inference temperature (e.g., 0.1 → 0.0) on Actor-Critic retries to progressively eliminate hallucination loops.
+- **Inference Timing Tracking**: Detailed performance breakdown separating VLM inference latency from Playwright execution time.
+- **Failure Screenshots**: Automatically saves a viewport `.png` snapshot when a step exhausts all retries (configurable via `screenshotOnFailure` and `screenshotDir`).
+- **`--dry-run`**: CLI flag to quickly validate `.vch` scripts for syntax errors without launching a browser or consuming API tokens.
+- **`--verbose`**: CLI flag that prints the coordinates clicked `(x, y)`, the text payload typed, the inference latency per step, and raw VLM reasoning error messages inline.
 - **GitHub Actions CI** — Automated build verification and lint checks on every push/PR.
 - **CHANGELOG.md** — Full release history for transparency and trust.
 - **SECURITY.md** — Responsible disclosure policy.
@@ -83,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heavy asset blocking (images, fonts, analytics) for faster page loads.
 - Early JSON stream cutoff across all providers to minimize inference latency.
 
+[1.3.1]: https://github.com/HackX-IN/vouch/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/HackX-IN/vouch/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/HackX-IN/vouch/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/HackX-IN/vouch/compare/v1.1.0...v1.2.0
