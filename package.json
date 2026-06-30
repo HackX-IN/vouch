@@ -1,7 +1,7 @@
 {
   "name": "@inamul_hasan/vouch",
-  "version": "1.2.1",
-  "description": "Zero-selector, vision-driven web and desktop automation engine. Acts like a human QA engineer using AI-powered computer vision.",
+  "version": "1.3.0",
+  "description": "Zero-selector, AI-powered browser automation. Write E2E tests in plain English — no CSS selectors, no XPaths. Uses computer vision (GPT-4o, Claude, Gemini, Ollama) + Playwright.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -18,24 +18,53 @@
     "testing",
     "automation",
     "e2e",
+    "end-to-end",
     "computer-vision",
     "ai",
+    "ai-testing",
+    "visual-testing",
+    "vision-language-model",
+    "playwright",
+    "browser-automation",
     "qa",
-    "visual-testing"
+    "natural-language",
+    "no-code-testing",
+    "self-healing",
+    "zero-selector",
+    "gpt-4o",
+    "claude",
+    "gemini",
+    "ollama",
+    "web-testing",
+    "regression-testing"
   ],
-  "author": "inamul_hasan",
+  "author": {
+    "name": "Inamul Hasan",
+    "url": "https://github.com/HackX-IN"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/HackX-IN/vouch.git"
+  },
+  "homepage": "https://github.com/HackX-IN/vouch#readme",
+  "bugs": {
+    "url": "https://github.com/HackX-IN/vouch/issues"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/HackX-IN"
   },
   "files": [
     "dist",
     "examples",
     "README.md",
     "USAGE.md",
+    "CHANGELOG.md",
     "LICENSE",
-    "CONTRIBUTING.md"
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

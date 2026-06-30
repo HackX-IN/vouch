@@ -17,6 +17,19 @@ export abstract class BaseProvider implements AIProviderClient {
   ): Promise<VisionQAResponse>;
 
   /**
+   * Wraps an analyze call with inference timing measurement.
+   * Subclasses call this to get automatic timing on their responses.
+   */
+  protected async withTiming(
+    fn: () => Promise<VisionQAResponse>,
+  ): Promise<VisionQAResponse> {
+    const start = performance.now();
+    const response = await fn();
+    response.inferenceTimeMs = Math.round(performance.now() - start);
+    return response;
+  }
+
+  /**
    * Parses the raw AI response text into a validated VisionQAResponse.
    */
   protected parseResponse(raw: string): VisionQAResponse {
@@ -112,4 +125,3 @@ export abstract class BaseProvider implements AIProviderClient {
     return false;
   }
 }
-

@@ -17,6 +17,8 @@ export interface VisionQAResponse {
   reasoning: string;
   actions: VisionQAAction[];
   detectedValidationError: string;
+  /** Time spent waiting for VLM inference (ms) — populated by providers */
+  inferenceTimeMs?: number;
 }
 
 // ─── History Ledger ──────────────────────────────────────────────────
@@ -31,6 +33,10 @@ export interface HistoryEntry {
   success: boolean;
   error?: string;
   detectedValidationError?: string;
+  /** VLM inference latency for this attempt (ms) */
+  inferenceTimeMs?: number;
+  /** Path to the failure screenshot, if any */
+  screenshotPath?: string;
 }
 
 // ─── Test Step ───────────────────────────────────────────────────────
@@ -49,6 +55,13 @@ export type StepResult = {
   duration: number;
   attempts: HistoryEntry[];
   error?: string;
+  /** Path to failure screenshot saved to disk */
+  failureScreenshot?: string;
+  /** Breakdown of time spent in VLM inference vs browser execution */
+  timing?: {
+    totalInferenceMs: number;
+    totalExecutionMs: number;
+  };
 };
 
 // ─── Test Suite ──────────────────────────────────────────────────────
@@ -67,6 +80,11 @@ export interface TestRunResult {
   totalPassed: number;
   totalFailed: number;
   totalSkipped: number;
+  /** Aggregate timing breakdown for the entire run */
+  timing?: {
+    totalInferenceMs: number;
+    totalExecutionMs: number;
+  };
 }
 
 // ─── Configuration ──────────────────────────────────────────────────
@@ -108,6 +126,12 @@ export interface VouchConfig {
   recordTrace: boolean;
   /** Trace output directory */
   traceDir: string;
+  /** Save a screenshot to disk when a step fails (for debugging) */
+  screenshotOnFailure: boolean;
+  /** Directory where failure screenshots are saved */
+  screenshotDir: string;
+  /** Enable verbose logging (shows AI reasoning, coordinates, timing breakdown) */
+  verbose: boolean;
 }
 
 export const DEFAULT_CONFIG: VouchConfig = {
@@ -126,6 +150,9 @@ export const DEFAULT_CONFIG: VouchConfig = {
   videoDir: "./.vouch/videos",
   recordTrace: true, // Enable tracing by default instead of video
   traceDir: "./.vouch/traces",
+  screenshotOnFailure: true, // Save failure screenshots by default
+  screenshotDir: "./.vouch/screenshots",
+  verbose: false,
 };
 
 // ─── AI Provider Interface ──────────────────────────────────────────

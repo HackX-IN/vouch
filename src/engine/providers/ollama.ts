@@ -6,6 +6,7 @@ import { BaseProvider } from "./base.js";
  * Ollama provider for running local AI models.
  * Uses streaming with early JSON cutoff — aborts inference
  * the moment a complete JSON object is detected.
+ * Uses temperature decay on retries for improved determinism.
  */
 export class OllamaProvider extends BaseProvider {
   private baseUrl: string;
@@ -26,45 +27,51 @@ export class OllamaProvider extends BaseProvider {
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
-    const userMessage = buildUserMessage(stepInstruction, historyLedger);
+    return this.withTiming(async () => {
+      const userMessage = buildUserMessage(stepInstruction, historyLedger);
 
-    const base64Image = imageBuffer.toString("base64");
+      const base64Image = imageBuffer.toString("base64");
 
-    const controller = new AbortController();
+      const controller = new AbortController();
 
-    const response = await fetch(`${this.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: this.model,
-        stream: true,
-        keep_alive: "5m",
-        options: {
-          temperature: 0,
-          num_predict: 1024,
-          num_ctx: 2048,
-        },
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: userMessage,
-            images: [base64Image],
+      // Temperature decay: lower temperature on retries for more deterministic outputs
+      const retryCount = historyLedger.filter(h => !h.success).length;
+      const temperature = Math.max(0, 0.1 - (retryCount * 0.03));
+
+      const response = await fetch(`${this.baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: this.model,
+          stream: true,
+          keep_alive: "5m",
+          options: {
+            temperature,
+            num_predict: 1024,
+            num_ctx: 2048,
           },
-        ],
-      }),
+          messages: [
+            { role: "system", content: systemPrompt },
+            {
+              role: "user",
+              content: userMessage,
+              images: [base64Image],
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Ollama request failed (${response.status}): ${errText}`);
+      }
+
+      // Stream tokens and abort the instant we have valid JSON
+      const raw = await this.streamUntilJSON(response, controller);
+      if (!raw) throw new Error("Ollama returned empty response");
+      return this.parseResponse(raw);
     });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Ollama request failed (${response.status}): ${errText}`);
-    }
-
-    // Stream tokens and abort the instant we have valid JSON
-    const raw = await this.streamUntilJSON(response, controller);
-    if (!raw) throw new Error("Ollama returned empty response");
-    return this.parseResponse(raw);
   }
 
   /**

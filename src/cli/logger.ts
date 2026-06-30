@@ -23,6 +23,7 @@ export function createLogger(config?: VouchConfig): Logger {
   const o: any = ora?.default ?? ora;
 
   let currentSpinner: any = null;
+  const verbose = config?.verbose ?? false;
 
   const maskSecret = (str: string) => {
     if (!str) return str;
@@ -80,10 +81,22 @@ export function createLogger(config?: VouchConfig): Logger {
           );
         } else {
           console.log(
-            c.bold.green(`  ${f.cross} ${result.totalFailed} failed`) +
+            c.bold.red(`  ${f.cross} ${result.totalFailed} failed`) +
               c.dim(` | `) +
               c.green(`${result.totalPassed} passed`) +
               c.dim(` (${duration}s)`),
+          );
+        }
+
+        // Show aggregate timing breakdown
+        if (result.timing) {
+          const inferSec = (result.timing.totalInferenceMs / 1000).toFixed(1);
+          const execSec = (result.timing.totalExecutionMs / 1000).toFixed(1);
+          const inferPct = result.timing.totalInferenceMs + result.timing.totalExecutionMs > 0
+            ? Math.round((result.timing.totalInferenceMs / (result.timing.totalInferenceMs + result.timing.totalExecutionMs)) * 100)
+            : 0;
+          console.log(
+            c.dim(`  ⏱  AI inference: ${inferSec}s (${inferPct}%) | Browser execution: ${execSec}s (${100 - inferPct}%)`),
           );
         }
       } else {
@@ -121,13 +134,38 @@ export function createLogger(config?: VouchConfig): Logger {
 
       if (currentSpinner) {
         if (result.status === "passed") {
-          currentSpinner.succeed(
-            currentSpinner.text + c.dim(` ${durationStr}`),
-          );
+          let suffix = c.dim(` ${durationStr}`);
+          // Show timing breakdown in verbose mode
+          if (verbose && result.timing) {
+            const inferMs = result.timing.totalInferenceMs;
+            const execMs = result.timing.totalExecutionMs;
+            suffix += c.dim(` [inference: ${inferMs}ms | exec: ${execMs}ms]`);
+          }
+          currentSpinner.succeed(currentSpinner.text + suffix);
         } else if (result.status === "failed") {
           currentSpinner.fail(currentSpinner.text + c.dim(` ${durationStr}`));
           if (result.error) {
             console.log(c.dim(`     └─ `) + c.red(maskSecret(result.error)));
+          }
+          // Show failure screenshot path
+          if (result.failureScreenshot) {
+            console.log(c.dim(`     📸 Screenshot: `) + c.yellow(result.failureScreenshot));
+          }
+          // Show verbose debugging info
+          if (verbose && result.attempts.length > 0) {
+            for (const attempt of result.attempts) {
+              const coordsInfo = `(${attempt.x}, ${attempt.y})`;
+              const inferInfo = attempt.inferenceTimeMs ? ` [${attempt.inferenceTimeMs}ms]` : "";
+              const statusIcon = attempt.success ? c.green("✓") : c.red("✗");
+              console.log(
+                c.dim(`     │  ${statusIcon} Attempt #${attempt.attempt}: `) +
+                c.dim(`${attempt.action} @ ${coordsInfo}${inferInfo}`) +
+                (attempt.textPayload ? c.dim(` text="${attempt.textPayload}"`) : "")
+              );
+              if (attempt.error) {
+                console.log(c.dim(`     │    reason: `) + c.red(maskSecret(attempt.error).split("\n")[0]));
+              }
+            }
           }
         } else {
           currentSpinner.stopAndPersist({
@@ -144,11 +182,15 @@ export function createLogger(config?: VouchConfig): Logger {
           if (c && f) {
             console.log(c.red(f.cross) + c.dim(` ${durationStr}`));
             if (result.error)
-              console.log(c.green(`     └─ ${maskSecret(result.error)}`));
+              console.log(c.dim(`     └─ `) + c.red(maskSecret(result.error)));
+            if (result.failureScreenshot)
+              console.log(c.dim(`     📸 Screenshot: `) + c.yellow(result.failureScreenshot));
           } else {
             console.log(` FAIL ${durationStr}`);
             if (result.error)
               console.log(`     └─ ${maskSecret(result.error)}`);
+            if (result.failureScreenshot)
+              console.log(`     📸 Screenshot: ${result.failureScreenshot}`);
           }
         } else {
           if (c && f) console.log(c.dim(f.arrowRight + " skipped"));

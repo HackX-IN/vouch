@@ -53,6 +53,23 @@ export function loadConfig(overrides: Partial<VouchConfig> = {}): VouchConfig {
 }
 
 /**
+ * Validates a .vch file without executing it (dry-run mode).
+ * Returns the parsed suite for inspection.
+ */
+export function validateTestFile(filePath: string): { suite: TestSuite; valid: boolean; error?: string } {
+  try {
+    const suite = parseVchFile(filePath);
+    return { suite, valid: true };
+  } catch (err) {
+    return {
+      suite: { name: "", filePath, steps: [] },
+      valid: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
  * Core test runner — orchestrates the full test execution lifecycle.
  */
 export async function runTestFile(
@@ -79,6 +96,10 @@ export async function runTestFile(
     totalSkipped: 0,
   };
 
+  // Aggregate timing accumulators
+  let totalInferenceMs = 0;
+  let totalExecutionMs = 0;
+
   try {
     // 3. Launch browser
     logger.info("Launching browser...");
@@ -101,6 +122,12 @@ export async function runTestFile(
 
       const stepResult = await coordinator.executeStep(step, isLastActionStep, criticFeedback);
       criticFeedback = undefined;
+
+      // Accumulate timing
+      if (stepResult.timing) {
+        totalInferenceMs += stepResult.timing.totalInferenceMs;
+        totalExecutionMs += stepResult.timing.totalExecutionMs;
+      }
 
       if (stepResult.status === "failed") {
         // Backtrack Auto-Healing Logic
@@ -169,9 +196,23 @@ export async function runTestFile(
       logger.info(`Trace saved: ${path.resolve(trace)}`);
       logger.info(`Run 'npx playwright show-trace ${trace}' to view interactive playback.`);
     }
+
+    // Log failure screenshots location if any were saved
+    const failureScreenshots = result.results
+      .filter(r => r.failureScreenshot)
+      .map(r => r.failureScreenshot!);
+    if (failureScreenshots.length > 0) {
+      logger.info(`📸 ${failureScreenshots.length} failure screenshot(s) saved to: ${path.resolve(config.screenshotDir)}`);
+    }
   }
 
   result.endTime = Date.now();
+
+  // Attach aggregate timing
+  result.timing = {
+    totalInferenceMs,
+    totalExecutionMs,
+  };
 
   // 6. Generate report
   if (config.report) {

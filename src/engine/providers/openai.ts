@@ -6,6 +6,7 @@ import { BaseProvider } from "./base.js";
 /**
  * OpenAI provider with streaming + early JSON cutoff.
  * Aborts the stream the moment a complete JSON response is detected.
+ * Uses temperature decay on retries for improved determinism.
  */
 export class OpenAIProvider extends BaseProvider {
   private client: OpenAI;
@@ -26,49 +27,55 @@ export class OpenAIProvider extends BaseProvider {
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
-    const userMessage = buildUserMessage(
-      stepInstruction,
-      historyLedger
-    );
+    return this.withTiming(async () => {
+      const userMessage = buildUserMessage(
+        stepInstruction,
+        historyLedger
+      );
 
-    const base64Image = imageBuffer.toString("base64");
+      const base64Image = imageBuffer.toString("base64");
 
-    const stream = await this.client.chat.completions.create({
-      model: this.model,
-      max_tokens: 1024,
-      temperature: 0.1,
-      stream: true,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: userMessage },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${base64Image}`,
-                detail: "high"
+      // Temperature decay: lower temperature on retries for more deterministic outputs
+      const retryCount = historyLedger.filter(h => !h.success).length;
+      const temperature = Math.max(0, 0.1 - (retryCount * 0.03));
+
+      const stream = await this.client.chat.completions.create({
+        model: this.model,
+        max_tokens: 1024,
+        temperature,
+        stream: true,
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userMessage },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Image}`,
+                  detail: "high"
+                },
               },
-            },
-          ],
-        },
-      ],
-    });
+            ],
+          },
+        ],
+      });
 
-    let accumulated = "";
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content ?? "";
-      accumulated += delta;
+      let accumulated = "";
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content ?? "";
+        accumulated += delta;
 
-      // Early cutoff — stop as soon as we have complete JSON
-      if (this.hasCompleteJSON(accumulated)) {
-        stream.controller.abort();
-        break;
+        // Early cutoff — stop as soon as we have complete JSON
+        if (this.hasCompleteJSON(accumulated)) {
+          stream.controller.abort();
+          break;
+        }
       }
-    }
 
-    if (!accumulated.trim()) throw new Error("OpenAI returned empty response");
-    return this.parseResponse(accumulated);
+      if (!accumulated.trim()) throw new Error("OpenAI returned empty response");
+      return this.parseResponse(accumulated);
+    });
   }
 }

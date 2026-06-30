@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type {
   HistoryEntry,
   StepResult,
@@ -10,7 +12,7 @@ import { BrowserController } from "../browser/controller.js";
 
 /**
  * Actor-Critic Action Coordinator.
- * Highly optimized for ultra-low latency AI interactions via the Accessibility Tree.
+ * Features: screenshot-on-failure, inference timing, temperature decay via providers.
  */
 export class ActionCoordinator {
   private readonly engine: VisionQAEngine;
@@ -29,8 +31,7 @@ export class ActionCoordinator {
 
   /**
    * Execute a single test step with deterministic self-healing retries.
-   * Time Complexity per attempt: O(N) where N is the depth of the AX Tree.
-   * Space Complexity: O(M) where M is the history allocation ledger size.
+   * Tracks inference vs execution timing and saves failure screenshots.
    */
   async executeStep(
     step: TestStep,
@@ -40,6 +41,7 @@ export class ActionCoordinator {
     const startTime = Date.now();
     const history: HistoryEntry[] = [];
     let currentCriticFeedback = initialCriticFeedback;
+    let totalInferenceMs = 0;
 
     if (step.type === "comment") {
       return { step, status: "skipped", duration: 0, attempts: [] };
@@ -56,13 +58,15 @@ export class ActionCoordinator {
           attempts: [],
         };
       } catch (err) {
-        return {
+        const result: StepResult = {
           step,
           status: "failed",
           duration: Date.now() - startTime,
           attempts: [],
           error: err instanceof Error ? err.message : String(err),
         };
+        result.failureScreenshot = await this.saveFailureScreenshot(step);
+        return result;
       }
     }
 
@@ -102,6 +106,10 @@ export class ActionCoordinator {
           history,
         );
 
+        // Track inference time
+        const inferenceMs = response.inferenceTimeMs ?? 0;
+        totalInferenceMs += inferenceMs;
+
         const hasComplete = response.actions.some(
           (a) => a.action === "complete",
         );
@@ -117,16 +125,22 @@ export class ActionCoordinator {
           success: false,
           detectedValidationError:
             response.detectedValidationError || undefined,
+          inferenceTimeMs: inferenceMs,
         };
 
         if (hasComplete) {
           entry.success = true;
           history.push(entry);
+          const totalDuration = Date.now() - startTime;
           return {
             step,
             status: "passed",
-            duration: Date.now() - startTime,
+            duration: totalDuration,
             attempts: history,
+            timing: {
+              totalInferenceMs,
+              totalExecutionMs: totalDuration - totalInferenceMs,
+            },
           };
         }
 
@@ -185,11 +199,16 @@ export class ActionCoordinator {
         history.push(entry);
 
         // Break early if action is structurally verified
+        const totalDuration = Date.now() - startTime;
         return {
           step,
           status: "passed",
-          duration: Date.now() - startTime,
+          duration: totalDuration,
           attempts: history,
+          timing: {
+            totalInferenceMs,
+            totalExecutionMs: totalDuration - totalInferenceMs,
+          },
         };
       } catch (err) {
         const runtimeError = err instanceof Error ? err.message : String(err);
@@ -206,11 +225,20 @@ export class ActionCoordinator {
       }
     }
 
+    // Step exhausted all retries — save failure screenshot
+    const failureScreenshot = await this.saveFailureScreenshot(step);
+    const totalDuration = Date.now() - startTime;
+
     return {
       step,
       status: "failed",
-      duration: Date.now() - startTime,
+      duration: totalDuration,
       attempts: history,
+      failureScreenshot,
+      timing: {
+        totalInferenceMs,
+        totalExecutionMs: totalDuration - totalInferenceMs,
+      },
       error:
         `Step execution failed after exhausting ${this.config.maxRetries} loops.\n` +
         history
@@ -218,6 +246,40 @@ export class ActionCoordinator {
           .map((h) => `     └─ [Attempt ${h.attempt}]: ${h.error}`)
           .join("\n"),
     };
+  }
+
+  /**
+   * Saves a screenshot of the current viewport to disk on failure.
+   * Returns the path to the saved screenshot, or undefined if saving fails.
+   */
+  private async saveFailureScreenshot(step: TestStep): Promise<string | undefined> {
+    if (!this.config.screenshotOnFailure) return undefined;
+
+    try {
+      const dir = this.config.screenshotDir;
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const safeName = step.instruction
+        .replace(/[^a-zA-Z0-9]/g, "_")
+        .slice(0, 50);
+      const filename = `failure-L${step.lineNumber}-${safeName}-${timestamp}.png`;
+      const filePath = path.join(dir, filename);
+
+      const page = this.browser.getPage();
+      await page.screenshot({
+        path: filePath,
+        type: "png",
+        fullPage: false,
+      });
+
+      return filePath;
+    } catch {
+      // Screenshot saving should never crash the test runner
+      return undefined;
+    }
   }
 
   /**

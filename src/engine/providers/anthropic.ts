@@ -6,6 +6,7 @@ import { BaseProvider } from "./base.js";
 /**
  * Anthropic provider with streaming + early JSON cutoff.
  * Aborts the stream the moment a complete JSON response is detected.
+ * Uses temperature decay on retries for improved determinism.
  */
 export class AnthropicProvider extends BaseProvider {
   private client: Anthropic;
@@ -30,56 +31,62 @@ export class AnthropicProvider extends BaseProvider {
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
   ): Promise<VisionQAResponse> {
-    const userMessage = buildUserMessage(
-      stepInstruction,
-      historyLedger
-    );
+    return this.withTiming(async () => {
+      const userMessage = buildUserMessage(
+        stepInstruction,
+        historyLedger
+      );
 
-    const base64Image = imageBuffer.toString("base64");
+      const base64Image = imageBuffer.toString("base64");
 
-    const stream = this.client.messages.stream({
-      model: this.model,
-      max_tokens: 1024,
-      temperature: 0.1,
-      system: systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: "image/jpeg",
-                data: base64Image,
+      // Temperature decay: lower temperature on retries for more deterministic outputs
+      const retryCount = historyLedger.filter(h => !h.success).length;
+      const temperature = Math.max(0, 0.1 - (retryCount * 0.03));
+
+      const stream = this.client.messages.stream({
+        model: this.model,
+        max_tokens: 1024,
+        temperature,
+        system: systemPrompt,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/jpeg",
+                  data: base64Image,
+                },
               },
-            },
-            { type: "text", text: userMessage },
-          ],
-        },
-      ],
-    });
+              { type: "text", text: userMessage },
+            ],
+          },
+        ],
+      });
 
-    let accumulated = "";
+      let accumulated = "";
 
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        accumulated += event.delta.text;
+      for await (const event of stream) {
+        if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "text_delta"
+        ) {
+          accumulated += event.delta.text;
 
-        // Early cutoff — stop as soon as we have complete JSON
-        if (this.hasCompleteJSON(accumulated)) {
-          stream.abort();
-          break;
+          // Early cutoff — stop as soon as we have complete JSON
+          if (this.hasCompleteJSON(accumulated)) {
+            stream.abort();
+            break;
+          }
         }
       }
-    }
 
-    if (!accumulated.trim()) {
-      throw new Error("Anthropic returned no text content");
-    }
-    return this.parseResponse(accumulated);
+      if (!accumulated.trim()) {
+        throw new Error("Anthropic returned no text content");
+      }
+      return this.parseResponse(accumulated);
+    });
   }
 }
