@@ -18,11 +18,11 @@ import { generateJSONReport } from "../reporter/json-reporter.js";
  * 2. vouch.config.json (if present)
  * 3. Environment variables
  * 4. CLI overrides
+ * CI mode forces headless + screenshotOnFailure, disables video recording.
  */
 export function loadConfig(overrides: Partial<VouchConfig> = {}): VouchConfig {
   let fileConfig: Partial<VouchConfig> = {};
 
-  // Try to load vouch.config.json from CWD
   const configPath = path.resolve("vouch.config.json");
   if (fs.existsSync(configPath)) {
     try {
@@ -33,28 +33,45 @@ export function loadConfig(overrides: Partial<VouchConfig> = {}): VouchConfig {
     }
   }
 
-  // Environment variable mappings
   const envConfig: Partial<VouchConfig> = {};
   if (process.env.VOUCH_PROVIDER)
     envConfig.provider = process.env.VOUCH_PROVIDER as VouchConfig["provider"];
   if (process.env.VOUCH_MODEL) envConfig.model = process.env.VOUCH_MODEL;
   if (process.env.VOUCH_API_KEY) envConfig.apiKey = process.env.VOUCH_API_KEY;
-  if (process.env.VOUCH_BASE_URL)
-    envConfig.baseUrl = process.env.VOUCH_BASE_URL;
-  if (process.env.VOUCH_HEADLESS)
-    envConfig.headless = process.env.VOUCH_HEADLESS === "true";
+  if (process.env.VOUCH_BASE_URL) envConfig.baseUrl = process.env.VOUCH_BASE_URL;
+  if (process.env.VOUCH_HEADLESS) envConfig.headless = process.env.VOUCH_HEADLESS === "true";
+  if (process.env.VOUCH_RETRIES) {
+    const n = parseInt(process.env.VOUCH_RETRIES, 10);
+    if (!isNaN(n)) envConfig.maxRetries = n;
+  }
+  if (process.env.VOUCH_TIMEOUT) {
+    const n = parseInt(process.env.VOUCH_TIMEOUT, 10);
+    if (!isNaN(n)) envConfig.stepTimeout = n;
+  }
+  if (process.env.VOUCH_VERBOSE) envConfig.verbose = process.env.VOUCH_VERBOSE === "true";
+  if (process.env.VOUCH_CI) envConfig.ci = process.env.VOUCH_CI === "true";
 
-  return {
+  const merged: VouchConfig = {
     ...DEFAULT_CONFIG,
     ...fileConfig,
     ...envConfig,
     ...overrides,
   };
+
+  // CI mode overrides: force headless, disable video, enable report + failure screenshots
+  if (merged.ci) {
+    merged.headless = true;
+    merged.recordVideo = false;
+    merged.consolidateVideo = false;
+    merged.report = true;
+    merged.screenshotOnFailure = true;
+  }
+
+  return merged;
 }
 
 /**
  * Validates a .vch file without executing it (dry-run mode).
- * Returns the parsed suite for inspection.
  */
 export function validateTestFile(filePath: string): {
   suite: TestSuite;
@@ -74,18 +91,16 @@ export function validateTestFile(filePath: string): {
 }
 
 /**
- * Core test runner — orchestrates the full test execution lifecycle.
+ * Core test runner — orchestrates the full test execution lifecycle for a single file.
  */
 export async function runTestFile(
   filePath: string,
   config: VouchConfig,
   logger: Logger,
 ): Promise<TestRunResult> {
-  // 1. Parse the test file
   const suite = parseVchFile(filePath);
   logger.suiteStart(suite);
 
-  // 2. Initialize components
   const engine = new VisionQAEngine(config);
   const browser = new BrowserController(config);
   const coordinator = new ActionCoordinator(engine, browser, config);
@@ -100,36 +115,28 @@ export async function runTestFile(
     totalSkipped: 0,
   };
 
-  // Aggregate timing accumulators
   let totalInferenceMs = 0;
   let totalExecutionMs = 0;
 
   try {
-    // 3. Launch browser
     logger.info("Launching browser...");
     await browser.launch();
     logger.info("Browser ready.");
 
-    // 4. Execute steps sequentially
-    const actionSteps = suite.steps.filter((s) => s.type !== "comment" && s.type !== "conditional_end");
+    const actionSteps = suite.steps.filter(s => s.type !== "comment" && s.type !== "conditional_end");
     let criticFeedback: string | undefined = undefined;
     let backtrackCount = 0;
     const MAX_BACKTRACKS = config.maxRetries;
     let skipUntilEndif = false;
-    // Track the indices of steps that were ACTUALLY executed (not skipped)
-    // so the backtracker never jumps into a skipped @if block.
     const executedIndices: number[] = [];
 
     for (let i = 0; i < suite.steps.length; i++) {
       const step = suite.steps[i];
       const isLastActionStep = step === actionSteps[actionSteps.length - 1];
 
-      // ── Conditional block skip logic ──
-      // When @if evaluated to false, skip every step until we hit @endif
+      // Skip block when @if condition was false
       if (skipUntilEndif) {
-        if (step.type === "conditional_end") {
-          skipUntilEndif = false;
-        }
+        if (step.type === "conditional_end") skipUntilEndif = false;
         const skipResult: import("../types/index").StepResult = { step, status: "skipped", duration: 0, attempts: [] };
         result.results.push(skipResult);
         result.totalSkipped++;
@@ -138,8 +145,7 @@ export async function runTestFile(
         continue;
       }
 
-      // ── @endif when condition was TRUE ──
-      // The block ran, so @endif is just a structural closer — skip it silently
+      // @endif closer when condition was true — structural only
       if (step.type === "conditional_end") {
         const skipResult: import("../types/index").StepResult = { step, status: "skipped", duration: 0, attempts: [] };
         result.results.push(skipResult);
@@ -149,25 +155,18 @@ export async function runTestFile(
         continue;
       }
 
-      if (!criticFeedback) {
-        logger.stepStart(step);
-      }
+      if (!criticFeedback) logger.stepStart(step);
 
-      const stepResult = await coordinator.executeStep(
-        step,
-        isLastActionStep,
-        criticFeedback,
-      );
+      const stepResult = await coordinator.executeStep(step, isLastActionStep, criticFeedback);
       criticFeedback = undefined;
 
-      // Accumulate timing
       if (stepResult.timing) {
         totalInferenceMs += stepResult.timing.totalInferenceMs;
         totalExecutionMs += stepResult.timing.totalExecutionMs;
       }
 
       if (stepResult.status === "failed") {
-        // ── @if condition was false → skip the block ──
+        // @if condition false → skip block
         if (step.type === "conditional") {
           skipUntilEndif = true;
           const skipBranchResult: import("../types/index").StepResult = { ...stepResult, status: "skipped" };
@@ -177,36 +176,25 @@ export async function runTestFile(
           continue;
         }
 
-        // Backtrack Auto-Healing Logic
-        // Only backtrack to steps that were actually EXECUTED (not skipped @if blocks)
+        // Auto-backtrack on failed assertions
         if (step.type === "assert" && backtrackCount < MAX_BACKTRACKS) {
-          // Walk backwards through the executed-only index list to find a
-          // suitable action step to retry (not assert, navigate, or structural).
           let backtrackTargetIndex = -1;
           for (let k = executedIndices.length - 1; k >= 0; k--) {
             const candidateIdx = executedIndices[k];
             const candidate = suite.steps[candidateIdx];
-            if (
-              candidate.type === "action" &&
-              candidateIdx !== i
-            ) {
+            if (candidate.type === "action" && candidateIdx !== i) {
               backtrackTargetIndex = candidateIdx;
               break;
             }
           }
           if (backtrackTargetIndex >= 0) {
             backtrackCount++;
-            logger.stepEnd({
-              step,
-              status: "skipped",
-              duration: 0,
-              attempts: [],
-            });
+            logger.stepEnd({ step, status: "skipped", duration: 0, attempts: [] });
             logger.info(
-              `\n  › ⚠️ Assertion failed. Auto-healing by backtracking to previous action (Attempt ${backtrackCount}/${MAX_BACKTRACKS})...`,
+              `\n  › Assertion failed. Auto-healing by backtracking to previous action (Attempt ${backtrackCount}/${MAX_BACKTRACKS})...`,
             );
             criticFeedback = `Your previous action failed to satisfy this assertion: "${step.instruction}". You MUST try clicking a completely DIFFERENT element or coordinate this time.`;
-            i = backtrackTargetIndex - 1; // -1 because the loop will do i++ next
+            i = backtrackTargetIndex - 1;
             continue;
           }
         }
@@ -214,10 +202,9 @@ export async function runTestFile(
         result.results.push(stepResult);
         result.totalFailed++;
         logger.stepEnd(stepResult);
-        continue; // Smartly move on to the next step on unrecoverable failure
+        continue;
       }
 
-      // Track this step as executed for the backtracker
       if (step.type === "action" || step.type === "conditional") {
         executedIndices.push(i);
       }
@@ -228,13 +215,11 @@ export async function runTestFile(
       logger.stepEnd(stepResult);
     }
   } catch (err) {
-    logger.error(
-      `Fatal error: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    logger.error(`Fatal error: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
-    // 5. Close browser
     await browser.close();
     logger.info("Browser closed.");
+
     const video = browser.getVideoPath();
     if (video) {
       const finalVideoPath = path.resolve(video);
@@ -242,71 +227,77 @@ export async function runTestFile(
 
       if (config.consolidateVideo) {
         try {
-          logger.info(
-            "Consolidating video (removing idle VLM inference time)...",
-          );
+          logger.info("Consolidating video (removing idle VLM inference time)...");
           const fastVideoPath = `${finalVideoPath}.fast.webm`;
-          // mpdecimate drops duplicate/idle frames, setpts resets the timestamps to play smoothly
           await execAsync(
             `ffmpeg -i "${finalVideoPath}" -vf "mpdecimate,setpts=N/FRAME_RATE/TB" -y "${fastVideoPath}"`,
           );
           fs.renameSync(fastVideoPath, finalVideoPath);
           logger.info("Video successfully consolidated!");
-        } catch (e) {
-          // FFmpeg is likely not installed or failed
-          logger.info(
-            "Note: Install FFmpeg on your system to automatically fast-forward and consolidate execution videos.",
-          );
+        } catch {
+          logger.info("Note: Install FFmpeg to automatically fast-forward execution videos.");
         }
       }
     }
+
     const trace = browser.getTracePath();
     if (trace) {
       logger.info(`Trace saved: ${path.resolve(trace)}`);
-      logger.info(
-        `Run 'npx playwright show-trace ${trace}' to view interactive playback.`,
-      );
+      logger.info(`Run 'npx playwright show-trace ${trace}' to view interactive playback.`);
     }
 
-    // Log failure screenshots location if any were saved
-    const failureScreenshots = result.results
-      .filter((r) => r.failureScreenshot)
-      .map((r) => r.failureScreenshot!);
+    const failureScreenshots = result.results.filter(r => r.failureScreenshot);
     if (failureScreenshots.length > 0) {
       logger.info(
-        `📸 ${failureScreenshots.length} failure screenshot(s) saved to: ${path.resolve(config.screenshotDir)}`,
+        `${failureScreenshots.length} failure screenshot(s) saved to: ${path.resolve(config.screenshotDir)}`,
       );
     }
   }
 
   result.endTime = Date.now();
+  result.timing = { totalInferenceMs, totalExecutionMs };
 
-  // Attach aggregate timing
-  result.timing = {
-    totalInferenceMs,
-    totalExecutionMs,
-  };
-
-  // 6. Generate report
   if (config.report) {
-    // Consolidate the report payload by removing redundant suite.steps
     const reportPayload = {
       ...result,
-      suite: {
-        name: result.suite.name,
-        filePath: result.suite.filePath,
-      },
+      suite: { name: result.suite.name, filePath: result.suite.filePath },
     };
-    const reportFile = generateJSONReport(
-      reportPayload,
-      config.reportDir,
-      config,
-    );
+    const reportFile = generateJSONReport(reportPayload, config.reportDir, config);
     logger.info(`Report generated: ${path.resolve(reportFile)}`);
   }
 
   logger.suiteEnd(result);
   return result;
+}
+
+/**
+ * Runs multiple .vch files with a configurable concurrency limit.
+ * Returns aggregate totals across all test files.
+ */
+export async function runAllTestFiles(
+  filePaths: string[],
+  config: VouchConfig,
+  logger: Logger,
+  concurrency = 1,
+): Promise<{ results: TestRunResult[]; totalPassed: number; totalFailed: number }> {
+  const results: TestRunResult[] = [];
+  let totalPassed = 0;
+  let totalFailed = 0;
+
+  // Process files in batches of `concurrency`
+  for (let i = 0; i < filePaths.length; i += concurrency) {
+    const batch = filePaths.slice(i, i + concurrency);
+    const batchResults = await Promise.all(
+      batch.map(fp => runTestFile(fp, config, logger)),
+    );
+    for (const r of batchResults) {
+      results.push(r);
+      totalPassed += r.totalPassed;
+      totalFailed += r.totalFailed;
+    }
+  }
+
+  return { results, totalPassed, totalFailed };
 }
 
 // ─── Logger Interface ────────────────────────────────────────────────

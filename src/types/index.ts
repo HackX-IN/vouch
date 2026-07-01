@@ -45,7 +45,7 @@ export interface TestStep {
   lineNumber: number;
   raw: string;
   instruction: string;
-  type: "navigate" | "action" | "assert" | "wait" | "conditional" | "conditional_end" | "comment";
+  type: "navigate" | "action" | "assert" | "wait" | "screenshot" | "conditional" | "conditional_end" | "comment";
   meta?: Record<string, string>;
 }
 
@@ -57,6 +57,8 @@ export type StepResult = {
   error?: string;
   /** Path to failure screenshot saved to disk */
   failureScreenshot?: string;
+  /** Path to named screenshot saved via @screenshot directive */
+  screenshotPath?: string;
   /** Breakdown of time spent in VLM inference vs browser execution */
   timing?: {
     totalInferenceMs: number;
@@ -134,6 +136,12 @@ export interface VouchConfig {
   verbose: boolean;
   /** File path to save and load browser auth state (cookies and localStorage) */
   storageState?: string;
+  /** CI mode: forces headless, enables report and screenshotOnFailure, disables video */
+  ci?: boolean;
+  /** JPEG quality for action screenshots (1-100). Higher = better AI accuracy, larger payload. Default 80. */
+  screenshotQuality: number;
+  /** Use lossless PNG for assertion/conditional steps for maximum AI accuracy. Default true. */
+  assertionScreenshotPng: boolean;
 }
 
 export const DEFAULT_CONFIG: VouchConfig = {
@@ -150,11 +158,13 @@ export const DEFAULT_CONFIG: VouchConfig = {
   recordVideo: false,
   consolidateVideo: false,
   videoDir: "./.vouch/videos",
-  recordTrace: true, // Enable tracing by default instead of video
+  recordTrace: true,
   traceDir: "./.vouch/traces",
-  screenshotOnFailure: true, // Save failure screenshots by default
+  screenshotOnFailure: true,
   screenshotDir: "./.vouch/screenshots",
   verbose: false,
+  screenshotQuality: 80,
+  assertionScreenshotPng: true,
 };
 
 // ─── AI Provider Interface ──────────────────────────────────────────
@@ -166,6 +176,7 @@ export interface AIProviderClient {
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
     isAssertionLike?: boolean,
+    mimeType?: "image/jpeg" | "image/png",
   ): Promise<VisionQAResponse>;
 }
 
@@ -178,10 +189,12 @@ export interface BrowserActions {
   click(pixelX: number, pixelY: number): Promise<void>;
   doubleClick(pixelX: number, pixelY: number): Promise<void>;
   type(pixelX: number, pixelY: number, text: string): Promise<void>;
+  scroll(pixelX: number, pixelY: number, deltaX: number, deltaY: number): Promise<void>;
+  scrollTo(position: "top" | "bottom"): Promise<void>;
   wait(ms: number): Promise<void>;
   getViewportSize(): { width: number; height: number };
-  /** Captures the current viewport as a JPEG buffer for the VLM. */
-  captureViewport(): Promise<Buffer>;
+  /** Captures the current viewport as an image buffer for the VLM. */
+  captureViewport(mode?: "action" | "assertion"): Promise<{ buffer: Buffer; mimeType: "image/jpeg" | "image/png" }>;
   /** Enforces asynchronous hydration tasks finish executing. */
   waitForVisualSettle(timeout?: number): Promise<void>;
   getVideoPath(): string | null;

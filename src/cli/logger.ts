@@ -116,7 +116,9 @@ export function createLogger(config?: VouchConfig): Logger {
               ? "🔍"
               : step.type === "wait"
                 ? "⏳"
-                : "🎯";
+                : step.type === "screenshot"
+                  ? "📸"
+                  : "🎯";
         currentSpinner = o({
           text:
             c.dim(`${prefix} L${step.lineNumber}: `) +
@@ -142,6 +144,9 @@ export function createLogger(config?: VouchConfig): Logger {
             suffix += c.dim(` [inference: ${inferMs}ms | exec: ${execMs}ms]`);
           }
           currentSpinner.succeed(currentSpinner.text + suffix);
+          if (result.screenshotPath) {
+            console.log(c.dim(`     📸 Screenshot: `) + c.cyan(result.screenshotPath));
+          }
         } else if (result.status === "failed") {
           currentSpinner.fail(currentSpinner.text + c.dim(` ${durationStr}`));
           if (result.error) {

@@ -6,7 +6,7 @@ import type {
   VouchConfig,
 } from "../types/index";
 import { TERMINAL_ACTIONS } from "../types/index";
-import { VISION_QA_SYSTEM_PROMPT } from "./prompts.js";
+import { VISION_QA_SYSTEM_PROMPT, ASSERTION_SYSTEM_PROMPT } from "./prompts.js";
 import { OpenAIProvider } from "./providers/openai.js";
 import { AnthropicProvider } from "./providers/anthropic.js";
 import { GoogleProvider } from "./providers/google.js";
@@ -14,7 +14,6 @@ import { OllamaProvider } from "./providers/ollama.js";
 
 /**
  * Creates the appropriate AI provider client based on config parameters.
- * Validates dependencies strictly at initialization.
  */
 export function createProvider(config: VouchConfig): AIProviderClient {
   const providers: Record<AIProvider, () => AIProviderClient> = {
@@ -61,7 +60,7 @@ export function createProvider(config: VouchConfig): AIProviderClient {
 
 /**
  * VisionQA Engine — Cognitive Core Controller.
- * Decoupled from stateful configuration layers to support dynamic model execution transformations.
+ * Selects the appropriate system prompt per step type to minimize token usage.
  */
 export class VisionQAEngine {
   private provider: AIProviderClient;
@@ -72,23 +71,17 @@ export class VisionQAEngine {
     this.provider = createProvider(config);
   }
 
-  /**
-   * Hot-swaps the underlying model provider client at runtime if config overrides are applied.
-   */
   public updateConfiguration(newConfig: VouchConfig): void {
     this.config = newConfig;
     this.provider = createProvider(newConfig);
   }
 
-  /**
-   * Analyzes page context via high-performance system configurations.
-   * Time Complexity: O(M) where M is the message layout serialization length.
-   */
   async analyze(
     stepInstruction: string,
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
     isAssertionLike?: boolean,
+    mimeType?: "image/jpeg" | "image/png",
   ): Promise<VisionQAResponse> {
     if (!stepInstruction?.trim()) {
       throw new Error(
@@ -96,19 +89,20 @@ export class VisionQAEngine {
       );
     }
 
+    const systemPrompt = isAssertionLike
+      ? ASSERTION_SYSTEM_PROMPT
+      : VISION_QA_SYSTEM_PROMPT;
+
     return this.provider.analyze(
-      VISION_QA_SYSTEM_PROMPT,
+      systemPrompt,
       stepInstruction,
       imageBuffer,
       historyLedger,
       isAssertionLike,
+      mimeType,
     );
   }
 
-  /**
-   * Maps normalized coordinates (0-1000) down to absolute display spaces safely.
-   * Enforces rigorous execution constraints against malformed engine coordinate sets.
-   */
   public toPixelCoords(
     normalizedX: number,
     normalizedY: number,
@@ -121,19 +115,12 @@ export class VisionQAEngine {
     };
   }
 
-  /**
-   * Evaluates if an execution outcome requires terminating the processing sequence.
-   */
   public isTerminal(response: VisionQAResponse): boolean {
-    if (!response || !response.actions || response.actions.length === 0) return false;
+    if (!response?.actions?.length) return false;
     return response.actions.some(a => (TERMINAL_ACTIONS as readonly string[]).includes(a.action));
   }
 
-  /**
-   * Determines if structural field input failures have been raised.
-   */
   public hasValidationError(response: VisionQAResponse): boolean {
-    // Explicit array checks safely guard against structural model parsing bugs
     return response.detectedValidationError.length > 0;
   }
 }

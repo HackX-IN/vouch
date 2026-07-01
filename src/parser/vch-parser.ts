@@ -5,9 +5,6 @@ import type { TestStep, TestSuite } from "../types/index";
 /**
  * Parses `.vch` script sheets into structured TestSuite object configurations.
  * Handles structural schema errors defensively, reporting accurate line numbers on failures.
- *
- * Time Complexity: O(N) where N is the character length of the raw file content.
- * Space Complexity: O(M) where M is the generated instruction step matrix ledger allocation.
  */
 export function parseVchFile(filePath: string): TestSuite {
   const absolutePath = path.resolve(filePath);
@@ -18,12 +15,11 @@ export function parseVchFile(filePath: string): TestSuite {
   }
 
   const content = fs.readFileSync(absolutePath, "utf-8");
-  const lines = content.split(/\r?\n/); // Safely handle both POSIX and Windows line endings
+  const lines = content.split(/\r?\n/);
 
   let suiteName = path.basename(filePath, ".vch");
   const steps: TestStep[] = [];
 
-  // Scoping depth indicator to guarantee structural integrity of conditional flows
   let activeConditionalDepth = 0;
 
   for (let i = 0; i < lines.length; i++) {
@@ -33,7 +29,7 @@ export function parseVchFile(filePath: string): TestSuite {
 
     if (!trimmed) continue;
 
-    // 1. Comment Processing Path
+    // 1. Comment
     if (trimmed.startsWith("#")) {
       steps.push({
         lineNumber,
@@ -44,7 +40,7 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // 2. Metadata Key-Value Processing Path
+    // 2. Metadata
     if (trimmed.startsWith(">")) {
       const metaContent = trimmed.slice(1).trim();
       const colonIndex = metaContent.indexOf(":");
@@ -56,7 +52,6 @@ export function parseVchFile(filePath: string): TestSuite {
       }
 
       const key = metaContent.slice(0, colonIndex).trim().toLowerCase();
-      // Safely slice all remaining content to preserve parameters with standalone ports/colons
       const value = metaContent.slice(colonIndex + 1).trim();
 
       if (!value) {
@@ -71,9 +66,9 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // 3. Navigation Directives
+    // 3. Navigation
     if (trimmed.startsWith("@navigate")) {
-      const url = trimmed.slice(9).trim(); // Fast offset pointer slice instead of sweeping RegExp lookups
+      const url = trimmed.slice(9).trim();
       if (!url || url === "@navigate") {
         throw new Error(
           `Syntax Error [Line ${lineNumber}]: Directives for "@navigate" require a valid target URL value parameter assignment.`,
@@ -89,7 +84,7 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // 4. Thread Delay Wait Directives
+    // 4. Wait
     if (trimmed.startsWith("@wait")) {
       const msParam = trimmed.slice(5).trim();
       const ms = parseInt(msParam, 10);
@@ -110,7 +105,7 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // 5. Visual State Assertion Directives
+    // 5. Assert
     if (trimmed.startsWith("@assert")) {
       const assertion = trimmed.slice(7).trim();
       if (!assertion) {
@@ -127,7 +122,27 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // 6. Branching Condition Blocks
+    // 6. Screenshot — saves a named PNG snapshot of the current viewport
+    if (trimmed.startsWith("@screenshot")) {
+      const name = trimmed.slice(11).trim();
+      if (!name) {
+        throw new Error(
+          `Syntax Error [Line ${lineNumber}]: Directives for "@screenshot" require a file name argument (e.g., @screenshot login-page).`,
+        );
+      }
+      // Strip any .png the user added, we always append it
+      const safeName = name.replace(/\.png$/i, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+      steps.push({
+        lineNumber,
+        raw,
+        instruction: `Screenshot: ${safeName}`,
+        type: "screenshot",
+        meta: { name: safeName },
+      });
+      continue;
+    }
+
+    // 7. Conditional block
     if (trimmed.startsWith("@if")) {
       const condition = trimmed.slice(3).trim();
       if (!condition) {
@@ -146,7 +161,7 @@ export function parseVchFile(filePath: string): TestSuite {
       continue;
     }
 
-    // 7. Scoping End Tokens
+    // 8. End conditional
     if (trimmed.startsWith("@endif")) {
       if (activeConditionalDepth <= 0) {
         throw new Error(
@@ -158,19 +173,19 @@ export function parseVchFile(filePath: string): TestSuite {
         lineNumber,
         raw,
         instruction: "End of conditional block execution scope",
-        type: "conditional_end", // Structural marker — never sent to AI
+        type: "conditional_end",
       });
       continue;
     }
 
-    // Prevent random unhandled structural directive tokens leaks from hitting natural language layers
+    // Block unknown directives
     if (trimmed.startsWith("@")) {
       throw new Error(
         `Syntax Error [Line ${lineNumber}]: Unrecognized runner directive statement framework instruction: "${trimmed}"`,
       );
     }
 
-    // 8. Plain English Actions Execution Path Fallback
+    // 9. Plain English action fallback
     steps.push({
       lineNumber,
       raw,
@@ -179,7 +194,6 @@ export function parseVchFile(filePath: string): TestSuite {
     });
   }
 
-  // Verify that all conditional blocks opened were closed correctly
   if (activeConditionalDepth > 0) {
     throw new Error(
       `Compilation Structural Fault [File: ${suiteName}]: Script processing terminated with unclosed structural scopes. Missing trailing "@endif" closures across ${activeConditionalDepth} conditional logic pathways.`,

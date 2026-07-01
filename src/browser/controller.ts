@@ -3,7 +3,6 @@ import {
   type Browser,
   type BrowserContext,
   type Page,
-  type Route,
 } from "playwright";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -89,7 +88,7 @@ export class BrowserController implements BrowserActions {
         recordVideo,
         storageState,
         ignoreHTTPSErrors: true,
-        reducedMotion: "reduce", // Enforce reduced motion accessibility settings natively
+        reducedMotion: "reduce",
       });
 
       // 4. Create and configure page
@@ -97,15 +96,34 @@ export class BrowserController implements BrowserActions {
       this.page.setDefaultTimeout(this.config.stepTimeout);
       this.page.setDefaultNavigationTimeout(this.config.stepTimeout);
 
-      // 5. Start Tracing
+      // 5. Register asset-blocking route once, globally for this context.
+      //    Re-registering per navigate() stacks interceptors — this is the correct fix.
+      await this.page.route("**/*", (route) => {
+        const req = route.request();
+        const type = req.resourceType();
+        const urlStr = req.url().toLowerCase();
+
+        const isAnalytics =
+          urlStr.includes("google-analytics") ||
+          urlStr.includes("analytics") ||
+          urlStr.includes("mixpanel") ||
+          urlStr.includes("doubleclick") ||
+          urlStr.includes("tracker");
+
+        if (isAnalytics || ["image", "media", "font"].includes(type)) {
+          route.abort().catch(() => {});
+        } else {
+          route.continue().catch(() => {});
+        }
+      });
+
+      // 6. Start Tracing
       if (this.config.recordTrace) {
         if (!fs.existsSync(this.config.traceDir)) {
           fs.mkdirSync(this.config.traceDir, { recursive: true });
         }
         await this.context.tracing.start({ screenshots: true, snapshots: true });
       }
-      this.page.setDefaultTimeout(this.config.stepTimeout);
-      this.page.setDefaultNavigationTimeout(this.config.stepTimeout);
 
       if (this.config.recordVideo && this.page.video()) {
         this.videoPath = await this.page.video()!.path();
@@ -171,7 +189,6 @@ export class BrowserController implements BrowserActions {
       if (!["http:", "https:"].includes(parsed.protocol)) {
         throw new Error("Invalid protocol. Only HTTP and HTTPS are permitted.");
       }
-      // Simple localhost SSRF check - can be expanded based on environment needs
       if (parsed.hostname === "169.254.169.254") {
         throw new Error("AWS Metadata SSRF target blocked.");
       }
@@ -181,34 +198,14 @@ export class BrowserController implements BrowserActions {
   }
 
   /**
-   * Navigates to target URL with performance optimizations.
-   * Blocks heavy assets (images, fonts, media, analytics) for <2s execution.
+   * Navigates to target URL. Route blocking is set up once in launch() —
+   * no interceptors registered here to avoid stacking handlers on repeat navigation.
    */
   async navigate(url: string): Promise<void> {
     this.assertPage();
     this.validateUrl(url);
 
     try {
-      // Use page.route to block heavy non-structural assets
-      await this.page!.route("**/*", (route: Route) => {
-        const req = route.request();
-        const type = req.resourceType();
-        const urlStr = req.url().toLowerCase();
-
-        const isAnalytics =
-          urlStr.includes("google-analytics") ||
-          urlStr.includes("analytics") ||
-          urlStr.includes("mixpanel") ||
-          urlStr.includes("doubleclick") ||
-          urlStr.includes("tracker");
-
-        if (isAnalytics || ["image", "media", "font"].includes(type)) {
-          route.abort().catch(() => {});
-        } else {
-          route.continue().catch(() => {});
-        }
-      });
-
       await this.page!.goto(url, { waitUntil: "domcontentloaded" });
       await this.waitForVisualSettle();
     } catch (error) {
@@ -217,23 +214,40 @@ export class BrowserController implements BrowserActions {
   }
 
   /**
-   * Captures the current viewport as a JPEG buffer for the VLM.
-   * Forces 50% quality and disabled animations for performance.
+   * Captures the current viewport for the VLM.
+   * - assertion mode: lossless PNG so text/UI details are pixel-perfect
+   * - action mode: high-quality JPEG (configurable) for smaller payload
    */
-  async captureViewport(): Promise<Buffer> {
+  async captureViewport(mode: "action" | "assertion" = "action"): Promise<{ buffer: Buffer; mimeType: "image/jpeg" | "image/png" }> {
     this.assertPage();
     try {
-      return await this.page!.screenshot({
+      const usePng = mode === "assertion" && this.config.assertionScreenshotPng;
+      if (usePng) {
+        const buffer = await this.page!.screenshot({
+          type: "png",
+          animations: "disabled",
+          fullPage: false,
+        });
+        return { buffer, mimeType: "image/png" };
+      }
+      const buffer = await this.page!.screenshot({
         type: "jpeg",
-        quality: 30,
-        animations: "disabled", // Force disable CSS animations to prevent flakiness
-        fullPage: false, // Strictly viewport-bound interaction
+        quality: this.config.screenshotQuality,
+        animations: "disabled",
+        fullPage: false,
       });
+      return { buffer, mimeType: "image/jpeg" };
     } catch (error) {
-      throw new Error(
-        `Failed to capture viewport: ${(error as Error).message}`,
-      );
+      throw new Error(`Failed to capture viewport: ${(error as Error).message}`);
     }
+  }
+
+  /** Saves a full-page screenshot to a named path for @screenshot steps. */
+  async saveScreenshot(filePath: string): Promise<void> {
+    this.assertPage();
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    await this.page!.screenshot({ path: filePath, type: "png", fullPage: false });
   }
 
   /** Hardware-level mouse click on specific coordinates */
@@ -241,7 +255,7 @@ export class BrowserController implements BrowserActions {
     this.assertPage();
     try {
       await this.page!.mouse.click(pixelX, pixelY);
-      await this.sleep(50);
+      await this.sleep(this.config.actionDelay);
     } catch (e) {
       throw new Error(`Click interaction failed: ${(e as Error).message}`);
     }
@@ -252,7 +266,7 @@ export class BrowserController implements BrowserActions {
     this.assertPage();
     try {
       await this.page!.mouse.click(pixelX, pixelY, { clickCount: 2 });
-      await this.sleep(50);
+      await this.sleep(this.config.actionDelay);
     } catch (e) {
       throw new Error(
         `Double click interaction failed: ${(e as Error).message}`,
@@ -260,18 +274,41 @@ export class BrowserController implements BrowserActions {
     }
   }
 
-  /** Hardware-level type simulation with clearing */
+  /** Hardware-level type simulation with triple-click clearing */
   async type(pixelX: number, pixelY: number, text: string): Promise<void> {
     this.assertPage();
     try {
       await this.page!.mouse.click(pixelX, pixelY, { clickCount: 3 });
-      await this.sleep(50);
+      await this.sleep(this.config.actionDelay);
       await this.page!.keyboard.press("Backspace");
       await this.page!.keyboard.type(text, { delay: 15 });
-      await this.sleep(50);
+      await this.sleep(this.config.actionDelay);
     } catch (e) {
       throw new Error(`Type interaction failed: ${(e as Error).message}`);
     }
+  }
+
+  /** Mouse wheel scroll at a specific position */
+  async scroll(pixelX: number, pixelY: number, deltaX: number, deltaY: number): Promise<void> {
+    this.assertPage();
+    try {
+      await this.page!.mouse.move(pixelX, pixelY);
+      await this.page!.mouse.wheel(deltaX, deltaY);
+    } catch (e) {
+      throw new Error(`Scroll interaction failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** Absolute scroll to top or bottom of the page */
+  async scrollTo(position: "top" | "bottom"): Promise<void> {
+    this.assertPage();
+    await this.page!.evaluate((pos) => {
+      window.scrollTo({
+        top: pos === "bottom" ? document.body.scrollHeight : 0,
+        behavior: "smooth",
+      });
+    }, position);
+    await this.sleep(600);
   }
 
   async wait(ms: number): Promise<void> {
@@ -285,27 +322,26 @@ export class BrowserController implements BrowserActions {
     };
   }
 
-  /** Exposes the Playwright Page if advanced escape hatches are strictly needed */
+  /** Exposes the Playwright Page for escape-hatch operations */
   getPage(): Page {
     this.assertPage();
     return this.page!;
   }
 
   /**
-   * Enforces asynchronous hydration tasks finish executing.
+   * Waits for pending network + animation microtasks to settle.
    */
-  public async waitForVisualSettle(timeout: number = 3500): Promise<void> {
+  public async waitForVisualSettle(timeout: number = 2000): Promise<void> {
     try {
       await this.page!.waitForLoadState("domcontentloaded", { timeout }).catch(
         () => {},
       );
-      // Allow thread painting microtasks to clear
       await this.page!.evaluate(
         () =>
-          new Promise((r) => requestAnimationFrame(() => setTimeout(r, 150))),
+          new Promise((r) => requestAnimationFrame(() => setTimeout(r, 100))),
       );
     } catch {
-      await this.sleep(150);
+      await this.sleep(100);
     }
   }
 

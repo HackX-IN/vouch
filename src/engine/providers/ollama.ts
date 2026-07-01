@@ -27,6 +27,7 @@ export class OllamaProvider extends BaseProvider {
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
     isAssertionLike?: boolean,
+    _mimeType?: "image/jpeg" | "image/png",
   ): Promise<VisionQAResponse> {
     return this.withTiming(async () => {
       const userMessage = buildUserMessage(stepInstruction, historyLedger);

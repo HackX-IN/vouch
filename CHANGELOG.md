@@ -5,6 +5,32 @@ All notable changes to Vouch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-07-01
+
+### Added
+- **`@screenshot <name>` directive** — Save a named PNG snapshot of the current viewport at any point in a test (e.g. `@screenshot dashboard-loaded`). No AI call consumed, saved to `.vouch/screenshots/`.
+- **`vouch run-all [dir]` command** — Discovers and runs all `.vch` files recursively in a directory. Supports `--concurrency N` to execute multiple test files in parallel.
+- **`--ci` flag / `VOUCH_CI=true` env var** — CI mode: forces headless, disables video, enables JSON report and failure screenshots. Ideal for GitHub Actions.
+- **`--timeout <ms>` CLI flag** — Override per-step timeout directly from the terminal without editing config.
+- **Dual screenshot modes** — Assertion steps now capture lossless **PNG** for maximum AI accuracy; action steps use high-quality **JPEG** (configurable via `screenshotQuality`). Significantly reduces false assertion failures.
+- **`screenshotQuality` config** — Control JPEG quality for action screenshots (default `80`). Higher = better AI element recognition.
+- **`assertionScreenshotPng` config** — Toggle lossless PNG for assertion/conditional steps (default `true`).
+- **New environment variables**: `VOUCH_RETRIES`, `VOUCH_TIMEOUT`, `VOUCH_VERBOSE`, `VOUCH_CI`.
+- **Lightweight assertion prompt** (`ASSERTION_SYSTEM_PROMPT`) — A separate, smaller system prompt used only for `@assert` and `@if` steps, reducing token usage ~40% and inference latency on assertion steps.
+
+### Fixed
+- **Route stacking bug**: `navigate()` previously re-registered `page.route()` on every call, stacking multiple conflicting interceptors. Route blocking is now registered once in `launch()`.
+- **Duplicate timeout call**: `setDefaultTimeout` was called twice in `launch()`.
+- **Hardcoded action delay**: `click()`, `doubleClick()`, and `type()` used a hardcoded 50ms sleep instead of `config.actionDelay`.
+- **`fill` without payload**: `fill` action without `textPayload` now correctly falls back to a click instead of throwing.
+
+### Changed
+- Screenshot quality increased from **30% → 80% JPEG** for action steps (better AI coordinate accuracy).
+- `waitForVisualSettle` default timeout reduced from **3500ms → 2000ms** (faster step throughput).
+- Post-action visual settle reduced from **2000ms → 1500ms**.
+- `scroll()` and `scrollTo()` extracted as proper methods on `BrowserController` (cleaner architecture).
+- `BrowserActions` interface now includes `scroll()` and `scrollTo()`.
+
 ## [1.3.1] - 2026-06-30
 
 ### Added
@@ -93,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heavy asset blocking (images, fonts, analytics) for faster page loads.
 - Early JSON stream cutoff across all providers to minimize inference latency.
 
+[1.4.0]: https://github.com/HackX-IN/vouch/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/HackX-IN/vouch/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/HackX-IN/vouch/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/HackX-IN/vouch/compare/v1.2.0...v1.2.1

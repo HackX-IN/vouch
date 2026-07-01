@@ -26,13 +26,11 @@ export class OpenAIProvider extends BaseProvider {
     stepInstruction: string,
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
+    isAssertionLike?: boolean,
+    mimeType: "image/jpeg" | "image/png" = "image/jpeg",
   ): Promise<VisionQAResponse> {
     return this.withTiming(async () => {
-      const userMessage = buildUserMessage(
-        stepInstruction,
-        historyLedger
-      );
-
+      const userMessage = buildUserMessage(stepInstruction, historyLedger);
       const base64Image = imageBuffer.toString("base64");
 
       // Temperature decay: lower temperature on retries for more deterministic outputs
@@ -53,7 +51,7 @@ export class OpenAIProvider extends BaseProvider {
               {
                 type: "image_url",
                 image_url: {
-                  url: `data:image/jpeg;base64,${base64Image}`,
+                  url: `data:${mimeType};base64,${base64Image}`,
                   detail: "high"
                 },
               },

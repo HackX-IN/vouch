@@ -30,13 +30,11 @@ export class AnthropicProvider extends BaseProvider {
     stepInstruction: string,
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
+    isAssertionLike?: boolean,
+    mimeType: "image/jpeg" | "image/png" = "image/jpeg",
   ): Promise<VisionQAResponse> {
     return this.withTiming(async () => {
-      const userMessage = buildUserMessage(
-        stepInstruction,
-        historyLedger
-      );
-
+      const userMessage = buildUserMessage(stepInstruction, historyLedger);
       const base64Image = imageBuffer.toString("base64");
 
       // Temperature decay: lower temperature on retries for more deterministic outputs
@@ -56,7 +54,7 @@ export class AnthropicProvider extends BaseProvider {
                 type: "image",
                 source: {
                   type: "base64",
-                  media_type: "image/jpeg",
+                  media_type: mimeType,
                   data: base64Image,
                 },
               },

@@ -15,6 +15,7 @@ export abstract class BaseProvider implements AIProviderClient {
     imageBuffer: Buffer,
     historyLedger: HistoryEntry[],
     isAssertionLike?: boolean,
+    mimeType?: "image/jpeg" | "image/png",
   ): Promise<VisionQAResponse>;
 
   /**
